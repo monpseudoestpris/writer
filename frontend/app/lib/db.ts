@@ -230,3 +230,86 @@ export async function deleteCritiquesByChapter(chapterId: string): Promise<void>
     await db.delete('critiques', c.id);
   }
 }
+
+// ==========================================
+// EXPORT / IMPORT
+// ==========================================
+
+export interface WriterExport {
+  version: number;
+  exportedAt: string;
+  books: Book[];
+  chapters: Chapter[];
+  critiques: CritiqueEntry[];
+  settings: { key: string; value: string }[];
+}
+
+export async function exportDatabase(): Promise<WriterExport> {
+  const db = await getDB();
+  const [books, chapters, critiques, settings] = await Promise.all([
+    db.getAll('books'),
+    db.getAll('chapters'),
+    db.getAll('critiques'),
+    db.getAll('settings'),
+  ]);
+  return {
+    version: 3,
+    exportedAt: new Date().toISOString(),
+    books,
+    chapters,
+    critiques,
+    settings,
+  };
+}
+
+export function downloadExport(data: WriterExport): void {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const date = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `writer-backup-${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function importDatabase(data: WriterExport): Promise<{ books: number; chapters: number; critiques: number }> {
+  if (!data.version || !data.books || !data.chapters) {
+    throw new Error('Fichier de sauvegarde invalide.');
+  }
+
+  const db = await getDB();
+
+  // Clear existing data
+  const tx = db.transaction(['books', 'chapters', 'critiques', 'settings'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('books').clear(),
+    tx.objectStore('chapters').clear(),
+    tx.objectStore('critiques').clear(),
+    tx.objectStore('settings').clear(),
+  ]);
+  await tx.done;
+
+  // Import all records
+  const txImport = db.transaction(['books', 'chapters', 'critiques', 'settings'], 'readwrite');
+  for (const book of data.books) {
+    await txImport.objectStore('books').put(book);
+  }
+  for (const chapter of data.chapters) {
+    await txImport.objectStore('chapters').put(chapter);
+  }
+  for (const critique of (data.critiques || [])) {
+    await txImport.objectStore('critiques').put(critique);
+  }
+  for (const setting of (data.settings || [])) {
+    await txImport.objectStore('settings').put(setting);
+  }
+  await txImport.done;
+
+  return {
+    books: data.books.length,
+    chapters: data.chapters.length,
+    critiques: (data.critiques || []).length,
+  };
+}

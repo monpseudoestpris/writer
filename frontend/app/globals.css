@@ -2,53 +2,65 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #111118;
+  --bg-elevated: #16161f;
+  --bg-surface: #1c1c28;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.1);
+  --accent: #c9a55a;
+  --accent-soft: rgba(201, 165, 90, 0.15);
+  --accent-glow: rgba(201, 165, 90, 0.08);
+  --text-primary: #e8e6e1;
+  --text-secondary: #9a9890;
+  --text-muted: #5c5a55;
+}
+
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
   overflow: hidden;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg-primary);
 }
 
-/* Custom scrollbar for critique panel */
-.critique-content::-webkit-scrollbar,
-.overflow-y-auto::-webkit-scrollbar {
-  width: 6px;
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
 }
-
-.critique-content::-webkit-scrollbar-track,
-.overflow-y-auto::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
-
-.critique-content::-webkit-scrollbar-thumb,
-.overflow-y-auto::-webkit-scrollbar-thumb {
-  background-color: #3f3f46;
-  border-radius: 3px;
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
 }
-
-.critique-content::-webkit-scrollbar-thumb:hover,
-.overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background-color: #52525b;
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.14);
 }
 
 /* Smooth critique content appearance */
 .critique-content {
-  animation: fadeIn 0.3s ease-in;
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ContentEditable editor placeholder */
+/* ContentEditable editor */
 [contenteditable][data-placeholder]:empty::before {
   content: attr(data-placeholder);
-  color: #52525b;
+  color: var(--text-muted);
   pointer-events: none;
+  font-style: italic;
 }
 
-/* ContentEditable editor styles */
 [contenteditable]:focus {
   outline: none;
 }
@@ -56,4 +68,99 @@ html, body {
 [contenteditable] b,
 [contenteditable] strong {
   font-weight: 700;
+}
+
+/* Editor font */
+.editor-area {
+  font-family: 'Lora', Georgia, 'Times New Roman', serif;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Subtle glow on accent buttons */
+.btn-accent {
+  background: linear-gradient(135deg, var(--accent), #b8944a);
+  color: #0a0a0f;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 0 0 rgba(201, 165, 90, 0);
+}
+.btn-accent:hover:not(:disabled) {
+  box-shadow: 0 0 20px rgba(201, 165, 90, 0.25);
+  transform: translateY(-1px);
+}
+.btn-accent:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Sidebar item transitions */
+.sidebar-item {
+  transition: all 0.15s ease;
+  border-left: 2px solid transparent;
+}
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.sidebar-item.active {
+  background: var(--accent-glow);
+  border-left-color: var(--accent);
+}
+
+/* Tab underline animation */
+.tab-btn {
+  position: relative;
+  transition: color 0.2s ease;
+}
+.tab-btn::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: var(--accent);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateX(-50%);
+  border-radius: 1px;
+}
+.tab-btn.active::after {
+  width: 60%;
+}
+
+/* Pulse animation for loading */
+@keyframes gentlePulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.loading-cursor {
+  animation: gentlePulse 1s ease-in-out infinite;
+}
+
+/* Input focus ring */
+.input-writer {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  transition: all 0.2s ease;
+}
+.input-writer:focus {
+  border-color: rgba(201, 165, 90, 0.4);
+  box-shadow: 0 0 0 3px rgba(201, 165, 90, 0.08);
+  outline: none;
+}
+.input-writer::placeholder {
+  color: var(--text-muted);
+}
+
+/* Divider gradient */
+.divider-glow {
+  background: linear-gradient(90deg, transparent, rgba(201, 165, 90, 0.15), transparent);
+  height: 1px;
 }

@@ -7,7 +7,8 @@ import {
   getChaptersByBook, createChapter, deleteChapter, saveChapterContent,
   getWriterProfile, saveWriterProfile,
   updateBook, updateChapter,
-  saveCritique, getCritiquesByChapter, updateCritiqueSummary, deleteCritique
+  saveCritique, getCritiquesByChapter, updateCritiqueSummary, deleteCritique,
+  exportDatabase, downloadExport, importDatabase, WriterExport
 } from './lib/db';
 
 type Reviewer = { id: string; name: string };
@@ -25,13 +26,13 @@ function renderInline(text: string): ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i} className="font-semibold text-zinc-100">{part.slice(2, -2)}</strong>;
+      return <strong key={i} className="font-semibold text-[var(--text-primary)]">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
-      return <em key={i} className="italic text-amber-200/80">{part.slice(1, -1)}</em>;
+      return <em key={i} className="italic text-[var(--accent)]/80">{part.slice(1, -1)}</em>;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={i} className="bg-zinc-800 text-amber-300 px-1.5 py-0.5 rounded text-xs font-mono">{part.slice(1, -1)}</code>;
+      return <code key={i} className="bg-[var(--bg-surface)] text-[var(--accent)] px-1.5 py-0.5 rounded text-xs font-mono">{part.slice(1, -1)}</code>;
     }
     return <span key={i}>{part}</span>;
   });
@@ -73,14 +74,14 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
       .replace(/^\*\*(.+?)\*\*$/, '$1');  // unwrap bold if whole title is bold
     if (level <= 2) {
       return (
-        <h2 key={i} className="text-xl font-bold text-amber-400 mb-4 mt-6 first:mt-0 pb-2 border-b border-zinc-800">
+        <h2 key={i} className="text-lg font-semibold text-[var(--text-primary)] mb-4 mt-6 first:mt-0 pb-2 border-b border-[var(--border-subtle)] tracking-tight">
           {renderInline(content)}
         </h2>
       );
     }
     return (
-      <h3 key={i} className="text-base font-bold text-amber-300 mt-6 mb-3 flex items-center gap-2">
-        <span className="w-1 h-5 bg-amber-500 rounded-full inline-block flex-shrink-0" />
+      <h3 key={i} className="text-[15px] font-semibold text-[var(--accent)] mt-6 mb-3 flex items-center gap-2">
+        <span className="w-0.5 h-4 bg-[var(--accent)] rounded-full inline-block flex-shrink-0 opacity-60" />
         {renderInline(content)}
       </h3>
     );
@@ -90,7 +91,7 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
   if (/^\*\*[^*]+\*\*:?\s*$/.test(trimmed)) {
     const inner = trimmed.replace(/^\*\*/, '').replace(/\*\*:?\s*$/, '');
     return (
-      <h4 key={i} className="text-sm font-bold text-amber-200 mt-5 mb-2">
+      <h4 key={i} className="text-sm font-semibold text-[var(--text-primary)] mt-5 mb-2">
         {inner}
       </h4>
     );
@@ -100,8 +101,8 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
   const numberedBoldMatch = trimmed.match(/^(\d+)\.\s+\*\*(.+?)\*\*\s*$/);
   if (numberedBoldMatch) {
     return (
-      <h4 key={i} className="text-sm font-bold text-amber-200 mt-5 mb-2 flex items-center gap-2">
-        <span className="text-amber-500">{numberedBoldMatch[1]}.</span>
+      <h4 key={i} className="text-sm font-semibold text-[var(--accent)] mt-5 mb-2 flex items-center gap-2">
+        <span className="text-[var(--accent)]/60">{numberedBoldMatch[1]}.</span>
         {numberedBoldMatch[2]}
       </h4>
     );
@@ -111,7 +112,7 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
   if (trimmed.startsWith('> ') || trimmed === '>') {
     const content = trimmed.startsWith('> ') ? trimmed.slice(2) : '';
     return (
-      <blockquote key={i} className="border-l-2 border-amber-600/40 pl-4 py-1 my-2 bg-amber-950/20 rounded-r-md text-zinc-300 italic text-sm leading-relaxed">
+      <blockquote key={i} className="border-l-2 border-[var(--accent)]/30 pl-4 py-2 my-2 bg-[var(--accent-soft)] rounded-r-lg text-[var(--text-secondary)] italic text-sm leading-relaxed">
         {renderInline(content)}
       </blockquote>
     );
@@ -123,8 +124,8 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
       ? trimmed.slice(2)
       : trimmed.slice(trimmed.indexOf(' ') + 1);
     return (
-      <div key={i} className="flex gap-2 my-1 ml-2 text-sm leading-relaxed text-zinc-300">
-        <span className="text-amber-500 mt-0.5 flex-shrink-0">•</span>
+      <div key={i} className="flex gap-2 my-1.5 ml-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+        <span className="text-[var(--accent)] mt-0.5 flex-shrink-0">•</span>
         <span>{renderInline(content)}</span>
       </div>
     );
@@ -135,15 +136,15 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
   if (numberedMatch) {
     return (
       <div key={i} className="flex gap-2 my-1.5 ml-1">
-        <span className="text-amber-500 font-bold text-sm w-6 flex-shrink-0 text-right">{numberedMatch[1]}.</span>
-        <span className="text-zinc-200 text-sm leading-relaxed">{renderInline(numberedMatch[2])}</span>
+        <span className="text-[var(--accent)] font-medium text-sm w-6 flex-shrink-0 text-right">{numberedMatch[1]}.</span>
+        <span className="text-[var(--text-secondary)] text-sm leading-relaxed">{renderInline(numberedMatch[2])}</span>
       </div>
     );
   }
 
   // Regular paragraph
   return (
-    <p key={i} className="text-zinc-300 text-sm leading-relaxed my-1.5">
+    <p key={i} className="text-[var(--text-secondary)] text-sm leading-relaxed my-1.5">
       {renderInline(line)}
     </p>
   );
@@ -415,25 +416,30 @@ export default function Home() {
   };
 
   return (
-    <div className="h-screen flex overflow-hidden bg-zinc-900">
+    <div className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
       {/* Sidebar */}
       {showSidebar && (
-        <div className="w-64 flex-shrink-0 bg-zinc-800 border-r border-zinc-700 flex flex-col">
+        <div className="w-60 flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col">
+          {/* Logo */}
+          <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+            <h1 className="text-[var(--accent)] font-semibold text-sm tracking-widest uppercase">Writer</h1>
+          </div>
+
           {/* Books Header */}
-          <div className="p-3 border-b border-zinc-700">
-            <h2 className="text-zinc-300 font-semibold text-sm mb-2">📚 Ouvrages</h2>
+          <div className="px-4 pt-4 pb-3">
+            <h2 className="text-[var(--text-muted)] font-medium text-[11px] tracking-widest uppercase mb-3">Ouvrages</h2>
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Nouvel ouvrage..."
+                placeholder="Nouvel ouvrage…"
                 value={newBookName}
                 onChange={(e) => setNewBookName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateBook()}
-                className="flex-1 px-2 py-1.5 bg-zinc-700 text-zinc-200 text-sm rounded border border-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="input-writer flex-1 px-3 py-1.5 text-[var(--text-primary)] text-sm rounded-lg"
               />
               <button
                 onClick={handleCreateBook}
-                className="px-2 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
+                className="px-2.5 py-1.5 bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-sm rounded-lg transition-all"
               >
                 +
               </button>
@@ -441,19 +447,21 @@ export default function Home() {
           </div>
 
           {/* Books List */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto px-2">
             {books.map(book => (
               <div key={book.id}>
                 <div
-                  className={`px-3 py-2 cursor-pointer flex items-center justify-between group ${
-                    selectedBook?.id === book.id ? 'bg-zinc-700' : 'hover:bg-zinc-700/50'
+                  className={`sidebar-item px-3 py-2 cursor-pointer flex items-center justify-between group rounded-lg mx-0 my-0.5 ${
+                    selectedBook?.id === book.id ? 'active' : ''
                   }`}
                   onClick={() => setSelectedBook(book)}
                 >
-                  <span className="text-zinc-300 text-sm truncate">📖 {book.title}</span>
+                  <span className={`text-sm truncate ${selectedBook?.id === book.id ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
+                    {book.title}
+                  </span>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id); }}
-                    className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs"
+                    className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs transition-opacity"
                   >
                     ✕
                   </button>
@@ -461,19 +469,21 @@ export default function Home() {
                 
                 {/* Chapters */}
                 {selectedBook?.id === book.id && (
-                  <div className="bg-zinc-900/50">
+                  <div className="ml-3 pl-3 border-l border-[var(--border-subtle)]">
                     {chapters.map(chapter => (
                       <div
                         key={chapter.id}
-                        className={`pl-6 pr-3 py-1.5 cursor-pointer flex items-center justify-between group ${
-                          selectedChapter?.id === chapter.id ? 'bg-blue-600/30 text-blue-300' : 'text-zinc-400 hover:bg-zinc-700/50'
+                        className={`sidebar-item px-3 py-1.5 cursor-pointer flex items-center justify-between group rounded-md my-0.5 ${
+                          selectedChapter?.id === chapter.id ? 'active' : ''
                         }`}
                         onClick={() => setSelectedChapter(chapter)}
                       >
-                        <span className="text-sm truncate">📄 {chapter.title}</span>
+                        <span className={`text-sm truncate ${selectedChapter?.id === chapter.id ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>
+                          {chapter.title}
+                        </span>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteChapter(chapter.id); }}
-                          className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs"
+                          className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs transition-opacity"
                         >
                           ✕
                         </button>
@@ -481,19 +491,19 @@ export default function Home() {
                     ))}
                     
                     {/* New Chapter */}
-                    <div className="pl-6 pr-3 py-2">
+                    <div className="py-2 pr-1">
                       <div className="flex gap-1">
                         <input
                           type="text"
-                          placeholder="Nouveau chapitre..."
+                          placeholder="Nouveau chapitre…"
                           value={newChapterName}
                           onChange={(e) => setNewChapterName(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
-                          className="flex-1 px-2 py-1 bg-zinc-700 text-zinc-300 text-xs rounded border border-zinc-600 focus:outline-none"
+                          className="input-writer flex-1 px-2 py-1 text-[var(--text-secondary)] text-xs rounded-md"
                         />
                         <button
                           onClick={handleCreateChapter}
-                          className="px-2 py-1 bg-zinc-600 hover:bg-zinc-500 text-zinc-300 text-xs rounded"
+                          className="px-2 py-1 bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-xs rounded-md transition-all"
                         >
                           +
                         </button>
@@ -504,69 +514,118 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          {/* Export / Import */}
+          <div className="p-3 border-t border-[var(--border-subtle)] flex gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  const data = await exportDatabase();
+                  downloadExport(data);
+                } catch (e) {
+                  alert('Erreur lors de l\'export : ' + (e as Error).message);
+                }
+              }}
+              className="flex-1 px-2 py-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-xs rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-medium)] transition-all flex items-center justify-center gap-1.5"
+            >
+              ↓ Export
+            </button>
+            <label className="flex-1 px-2 py-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-xs rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-medium)] transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              ↑ Import
+              <input
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const text = await file.text();
+                    const data: WriterExport = JSON.parse(text);
+                    if (!confirm(`Importer cette sauvegarde ?\n\nCela remplacera TOUTES les données actuelles par :\n- ${data.books?.length ?? 0} ouvrage(s)\n- ${data.chapters?.length ?? 0} chapitre(s)\n- ${(data.critiques?.length ?? 0)} critique(s)\n\nSauvegarde du ${data.exportedAt ? new Date(data.exportedAt).toLocaleDateString('fr-FR') : '?'}`)) {
+                      e.target.value = '';
+                      return;
+                    }
+                    const result = await importDatabase(data);
+                    alert(`Import réussi !\n${result.books} ouvrage(s), ${result.chapters} chapitre(s), ${result.critiques} critique(s)`);
+                    const freshBooks = await getBooks();
+                    setBooks(freshBooks);
+                    setSelectedBook(null);
+                    setSelectedChapter(null);
+                    setChapters([]);
+                  } catch (err) {
+                    alert('Erreur lors de l\'import : ' + (err as Error).message);
+                  }
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
         </div>
       )}
 
       {/* Toggle Sidebar */}
       <button
         onClick={() => setShowSidebar(!showSidebar)}
-        className="flex-shrink-0 w-6 h-full bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 flex items-center justify-center border-r border-zinc-700 transition-colors"
+        className="flex-shrink-0 w-5 h-full bg-[var(--bg-secondary)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center justify-center border-r border-[var(--border-subtle)] transition-all text-[10px]"
       >
-        {showSidebar ? '◀' : '▶'}
+        {showSidebar ? '‹' : '›'}
       </button>
 
       {/* Main Content */}
       <div className="flex-1 flex">
         {/* Left - Editor */}
-        <div className="w-1/2 flex flex-col border-r border-zinc-700">
+        <div className="w-1/2 flex flex-col">
           {/* Toolbar */}
-          <div className="flex-shrink-0 px-4 py-2 bg-zinc-800 border-b border-zinc-700 flex items-center gap-4">
-            <span className="text-zinc-400 text-sm font-medium">
-              {selectedChapter ? `✍️ ${selectedChapter.title}` : '✍️ Éditeur'}
+          <div className="flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
+            <span className="text-[var(--text-muted)] text-sm font-medium tracking-tight">
+              {selectedChapter ? selectedChapter.title : 'Éditeur'}
             </span>
             
-            {saving && <span className="text-zinc-500 text-xs">💾 Sauvegarde...</span>}
+            {saving && <span className="text-[var(--accent)]/50 text-xs">Sauvegarde…</span>}
             
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-1.5 ml-auto">
               <button
                 onClick={toggleBold}
-                className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-bold rounded transition-colors"
+                className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-sm font-bold transition-colors"
                 title="Gras (Ctrl+B)"
               >
                 B
               </button>
               <button
                 onClick={toggleItalic}
-                className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm italic rounded transition-colors"
+                className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-sm italic transition-colors"
                 title="Italique (Ctrl+I)"
               >
                 I
               </button>
               <button
                 onClick={toggleUnderline}
-                className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm underline rounded transition-colors"
+                className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-sm underline transition-colors"
                 title="Souligné (Ctrl+U)"
               >
                 U
               </button>
               
-              <div className="flex items-center gap-1 text-zinc-400 text-sm">
+              <div className="w-px h-5 bg-[var(--border-subtle)] mx-1" />
+              
+              <div className="flex items-center gap-0.5">
                 <button
                   onClick={() => setFontSize(f => Math.max(12, f - 2))}
-                  className="w-7 h-7 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded transition-colors"
+                  className="w-7 h-7 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] text-xs transition-colors"
                 >
                   −
                 </button>
-                <span className="w-8 text-center text-zinc-300">{fontSize}</span>
+                <span className="w-7 text-center text-[var(--text-muted)] text-xs tabular-nums">{fontSize}</span>
                 <button
                   onClick={() => setFontSize(f => Math.min(32, f + 2))}
-                  className="w-7 h-7 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded transition-colors"
+                  className="w-7 h-7 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] text-xs transition-colors"
                 >
                   +
                 </button>
               </div>
               
-              <span className="text-zinc-500 text-xs ml-2">{htmlToPlainText(text).length} car.</span>
+              <span className="text-[var(--text-muted)] text-[11px] ml-2 tabular-nums">{htmlToPlainText(text).length}</span>
             </div>
           </div>
 
@@ -576,28 +635,28 @@ export default function Home() {
               ref={editorRef}
               contentEditable
               suppressContentEditableWarning
-              className="flex-1 min-h-0 p-6 bg-zinc-900 text-zinc-100 focus:outline-none overflow-y-auto leading-relaxed"
+              className="editor-area flex-1 min-h-0 px-10 py-8 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none overflow-y-auto"
               style={{ fontSize: `${fontSize}px` }}
               onInput={() => {
                 if (editorRef.current) {
                   setText(editorRef.current.innerHTML);
                 }
               }}
-              data-placeholder="Commencez à écrire..."
+              data-placeholder="Commencez à écrire…"
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center text-zinc-500">
+            <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
-                <p className="text-lg mb-2">Sélectionnez un chapitre</p>
-                <p className="text-sm">ou créez un nouvel ouvrage dans la barre latérale</p>
+                <p className="text-[var(--text-muted)] text-lg font-light mb-1">Aucun chapitre sélectionné</p>
+                <p className="text-[var(--text-muted)]/60 text-sm">Créez un ouvrage et un chapitre pour commencer</p>
               </div>
             </div>
           )}
 
           {/* Bottom Bar */}
-          <div className="flex-shrink-0 px-4 py-3 bg-zinc-800 border-t border-zinc-700 flex items-center gap-3">
+          <div className="flex-shrink-0 px-5 py-3 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center gap-3">
             <select
-              className="px-3 py-2 rounded-md bg-zinc-700 text-zinc-200 text-sm border border-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-writer px-3 py-2 rounded-lg text-[var(--text-secondary)] text-sm"
               value={selectedReviewer}
               onChange={(e) => setSelectedReviewer(e.target.value)}
             >
@@ -606,51 +665,54 @@ export default function Home() {
               ))}
             </select>
             <button
-              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-accent flex-1 py-2.5 rounded-lg text-sm"
               onClick={handleReview}
               disabled={loading || !text}
             >
-              {loading ? '⏳ Analyse en cours...' : '📝 Obtenir une critique'}
+              {loading ? 'Analyse en cours…' : 'Obtenir une critique'}
             </button>
           </div>
         </div>
 
+        {/* Divider */}
+        <div className="w-px flex-shrink-0 bg-gradient-to-b from-transparent via-[var(--accent)]/20 to-transparent" />
+
         {/* Right - Critique / Profil */}
-        <div className="w-1/2 flex flex-col bg-black">
+        <div className="w-1/2 flex flex-col bg-[var(--bg-primary)]">
           {/* Tabs */}
-          <div className="flex-shrink-0 flex border-b border-zinc-800 bg-zinc-900">
+          <div className="flex-shrink-0 flex border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
             <button
               onClick={() => setRightTab('critique')}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
+              className={`tab-btn px-5 py-3 text-sm font-medium ${
                 rightTab === 'critique'
-                  ? 'text-amber-400 border-b-2 border-amber-400'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'active text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
               }`}
             >
-              💬 Critique
+              Critique
               {pastCritiques.length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-zinc-700 text-zinc-400 rounded-full">{pastCritiques.length}</span>
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--accent)]/10 text-[var(--accent)] rounded-full">{pastCritiques.length}</span>
               )}
             </button>
             <button
               onClick={() => setRightTab('contexte')}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
+              className={`tab-btn px-5 py-3 text-sm font-medium ${
                 rightTab === 'contexte'
-                  ? 'text-amber-400 border-b-2 border-amber-400'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'active text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
               }`}
             >
-              📋 Contexte
+              Contexte
             </button>
             <button
               onClick={() => setRightTab('profil')}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
+              className={`tab-btn px-5 py-3 text-sm font-medium ${
                 rightTab === 'profil'
-                  ? 'text-amber-400 border-b-2 border-amber-400'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'active text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
               }`}
             >
-              🎭 Profil
+              Profil
             </button>
           </div>
 
@@ -658,32 +720,32 @@ export default function Home() {
           {rightTab === 'critique' ? (
             <div className="flex-1 flex flex-col overflow-hidden">
               {error && (
-                <div className="flex-shrink-0 p-4 bg-red-900/30 border-b border-red-800 text-red-400">
+                <div className="flex-shrink-0 px-5 py-3 bg-red-500/5 border-b border-red-500/10 text-red-400 text-sm">
                   {error}
                 </div>
               )}
 
               {/* Progression indicator */}
               {pastCritiques.length > 0 && !loading && (
-                <div className="flex-shrink-0 px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between">
-                  <span className="text-zinc-400 text-xs">
-                    📊 {pastCritiques.length} critique{pastCritiques.length > 1 ? 's' : ''}
+                <div className="flex-shrink-0 px-5 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between">
+                  <span className="text-[var(--text-muted)] text-xs">
+                    {pastCritiques.length} critique{pastCritiques.length > 1 ? 's' : ''}
                   </span>
                   {textAtLastCritique !== null && text !== textAtLastCritique ? (
-                    <span className="text-green-400 text-xs">✏️ Texte modifié — progression évaluée</span>
+                    <span className="text-emerald-400/80 text-xs">Texte modifié — progression évaluée</span>
                   ) : textAtLastCritique !== null ? (
-                    <span className="text-zinc-500 text-xs">📌 Texte non modifié</span>
+                    <span className="text-[var(--text-muted)] text-xs">Texte non modifié</span>
                   ) : null}
                 </div>
               )}
 
               {/* Main critique area */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto px-6 py-6">
                 {/* Current critique or streaming */}
                 {(critique || loading) && !viewingCritiqueId && (
                   <div className="critique-content">
                     {critique.split('\n').map((line, i) => renderCritiqueLine(line, i))}
-                    {loading && <span className="animate-pulse text-amber-400 text-lg">▊</span>}
+                    {loading && <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>}
                   </div>
                 )}
 
@@ -694,42 +756,42 @@ export default function Home() {
                   const idx = pastCritiques.indexOf(pc);
                   return (
                     <div>
-                      <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center justify-between mb-5">
                         <button
                           onClick={() => { setViewingCritiqueId(null); setViewingSummary(false); }}
-                          className="text-amber-400 hover:text-amber-300 text-sm flex items-center gap-1 transition-colors"
+                          className="text-[var(--accent)] hover:text-[var(--accent)]/80 text-sm flex items-center gap-1.5 transition-colors"
                         >
                           ← Retour
                         </button>
-                        <span className="text-zinc-500 text-xs">
-                          Critique #{idx + 1} — {pc.reviewer} — {new Date(pc.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        <span className="text-[var(--text-muted)] text-xs">
+                          #{idx + 1} — {pc.reviewer} — {new Date(pc.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <div className="flex gap-2 mb-4">
+                      <div className="flex gap-2 mb-5">
                         <button
                           onClick={() => setViewingSummary(false)}
-                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                          className={`px-3 py-1.5 text-xs rounded-lg transition-all ${
                             !viewingSummary
-                              ? 'bg-amber-600 text-white'
-                              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                              ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-medium'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                           }`}
                         >
-                          📄 Critique complète
+                          Critique complète
                         </button>
                         <button
                           onClick={() => setViewingSummary(true)}
                           disabled={!pc.summary}
-                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                          className={`px-3 py-1.5 text-xs rounded-lg transition-all ${
                             viewingSummary
-                              ? 'bg-amber-600 text-white'
-                              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed'
+                              ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-medium'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] disabled:opacity-30 disabled:cursor-not-allowed'
                           }`}
                         >
-                          📋 Résumé
+                          Résumé
                         </button>
                       </div>
                       {viewingSummary && pc.summary ? (
-                        <div className="critique-content p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
+                        <div className="critique-content p-5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
                           {pc.summary.split('\n').map((line, i) => renderCritiqueLine(line, i))}
                         </div>
                       ) : (
@@ -743,26 +805,28 @@ export default function Home() {
 
                 {/* Empty state */}
                 {!critique && !loading && !viewingCritiqueId && pastCritiques.length === 0 && !error && (
-                  <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3">
-                    <span className="text-4xl opacity-40">📝</span>
-                    <p className="text-sm">Sélectionnez un critique et lancez l&apos;analyse</p>
+                  <div className="h-full flex flex-col items-center justify-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-[var(--accent)]/5 flex items-center justify-center">
+                      <span className="text-[var(--accent)]/40 text-xl">✦</span>
+                    </div>
+                    <p className="text-[var(--text-muted)] text-sm">Sélectionnez un critique et lancez l&apos;analyse</p>
                   </div>
                 )}
 
                 {/* No current critique but has history */}
                 {!critique && !loading && !viewingCritiqueId && pastCritiques.length > 0 && !error && (
-                  <div className="text-center text-zinc-500 py-8">
-                    <p className="text-sm mb-2">Pas de critique en cours</p>
-                    <p className="text-xs">Consultez l&apos;historique ci-dessous ou lancez une nouvelle analyse</p>
+                  <div className="text-center py-10">
+                    <p className="text-[var(--text-muted)] text-sm mb-1">Pas de critique en cours</p>
+                    <p className="text-[var(--text-muted)]/60 text-xs">Consultez l&apos;historique ou lancez une nouvelle analyse</p>
                   </div>
                 )}
               </div>
 
-              {/* Past critiques list (always visible at bottom if any) */}
+              {/* Past critiques list */}
               {pastCritiques.length > 0 && !loading && (
-                <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-900/80 max-h-[40%] overflow-y-auto">
-                  <div className="px-4 py-2 sticky top-0 bg-zinc-900 border-b border-zinc-800/50 z-10">
-                    <span className="text-zinc-400 text-xs font-medium">📜 Historique</span>
+                <div className="flex-shrink-0 border-t border-[var(--border-subtle)] max-h-[40%] overflow-y-auto">
+                  <div className="px-5 py-2 sticky top-0 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)] z-10">
+                    <span className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase">Historique</span>
                   </div>
                   {[...pastCritiques].reverse().map((pc, idx) => {
                     const critiqueNum = pastCritiques.length - idx;
@@ -770,21 +834,21 @@ export default function Home() {
                     return (
                       <div
                         key={pc.id}
-                        className={`w-full text-left px-4 py-3 border-b border-zinc-800/30 transition-colors ${
-                          isViewing ? 'bg-amber-900/20 border-l-2 border-l-amber-500' : 'hover:bg-zinc-800/50'
+                        className={`w-full text-left px-5 py-3 border-b border-[var(--border-subtle)] transition-all ${
+                          isViewing ? 'bg-[var(--accent-glow)] border-l-2 border-l-[var(--accent)]' : 'hover:bg-[var(--bg-elevated)]'
                         }`}
                       >
-                        <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center justify-between mb-1">
                           <button
                             onClick={() => { setViewingCritiqueId(isViewing ? null : pc.id); setViewingSummary(false); }}
                             className="flex-1 text-left"
                           >
-                            <span className={`text-sm font-medium ${isViewing ? 'text-amber-400' : 'text-zinc-300'}`}>
+                            <span className={`text-sm font-medium ${isViewing ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
                               #{critiqueNum} — {pc.reviewer}
                             </span>
                           </button>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-zinc-600 text-xs">
+                            <span className="text-[var(--text-muted)] text-[11px]">
                               {new Date(pc.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                             </span>
                             <button
@@ -797,8 +861,8 @@ export default function Home() {
                                   });
                                 }
                               }}
-                              className="text-zinc-600 hover:text-red-400 transition-colors px-1"
-                              title="Supprimer cette critique"
+                              className="text-[var(--text-muted)] hover:text-red-400 transition-colors px-1"
+                              title="Supprimer"
                             >
                               ✕
                             </button>
@@ -807,13 +871,13 @@ export default function Home() {
                         <div className="flex items-center gap-2 mt-1">
                           <button
                             onClick={() => { setViewingCritiqueId(isViewing ? null : pc.id); setViewingSummary(false); }}
-                            className="text-xs text-zinc-500 hover:text-amber-400 transition-colors"
+                            className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
                           >
-                            {isViewing ? '▲ Masquer la critique' : '▶ Voir la critique'}
+                            {isViewing ? '▲ Masquer' : '▶ Voir la critique'}
                           </button>
                           {pc.summary && (
                             <>
-                              <span className="text-zinc-700">·</span>
+                              <span className="text-[var(--border-medium)] text-[10px]">·</span>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -824,15 +888,15 @@ export default function Home() {
                                     return next;
                                   });
                                 }}
-                                className="text-xs text-zinc-500 hover:text-amber-400 transition-colors"
+                                className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
                               >
-                                {expandedSummaries.has(pc.id) ? '▲ Masquer le résumé' : '📋 Résumé'}
+                                {expandedSummaries.has(pc.id) ? '▲ Masquer le résumé' : 'Résumé'}
                               </button>
                             </>
                           )}
                         </div>
                         {expandedSummaries.has(pc.id) && pc.summary && (
-                          <div className="mt-2 p-3 bg-zinc-800/60 border border-zinc-700/50 rounded-lg critique-content">
+                          <div className="mt-3 p-4 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl critique-content">
                             {pc.summary.split('\n').map((line, i) => renderCritiqueLine(line, i))}
                           </div>
                         )}
@@ -843,16 +907,16 @@ export default function Home() {
               )}
             </div>
           ) : rightTab === 'contexte' ? (
-            <div className="flex-1 flex flex-col p-6 overflow-y-auto gap-6">
+            <div className="flex-1 flex flex-col px-6 py-6 overflow-y-auto gap-6">
               {/* Book Summary */}
               <div>
-                <h3 className="text-amber-400 font-semibold text-base mb-1">📖 Résumé de l&apos;ouvrage</h3>
-                <p className="text-zinc-500 text-sm mb-3">
-                  De quoi parle votre livre ? Thème, genre, ambiance, intrigue principale…
+                <h3 className="text-[var(--text-primary)] font-semibold text-sm mb-1 tracking-tight">Résumé de l&apos;ouvrage</h3>
+                <p className="text-[var(--text-muted)] text-xs mb-3">
+                  Thème, genre, ambiance, intrigue principale…
                 </p>
                 <textarea
-                  className="w-full min-h-[100px] p-3 bg-zinc-900 text-zinc-200 placeholder-zinc-600 rounded-lg border border-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed text-sm disabled:opacity-40"
-                  placeholder="Ex: Un thriller psychologique se déroulant dans un village isolé des Pyrénées. Le protagoniste, un ancien flic, enquête sur la disparition de sa fille…"
+                  className="input-writer w-full min-h-[100px] p-4 text-[var(--text-secondary)] placeholder-[var(--text-muted)] rounded-xl resize-none leading-relaxed text-sm disabled:opacity-30"
+                  placeholder="Ex: Un thriller psychologique se déroulant dans un village isolé des Pyrénées…"
                   value={bookSummary}
                   disabled={!selectedBook}
                   onChange={(e) => {
@@ -864,18 +928,18 @@ export default function Home() {
                     }, 1000);
                   }}
                 />
-                {!selectedBook && <p className="text-zinc-600 text-xs mt-1">Sélectionnez un ouvrage pour écrire son résumé</p>}
+                {!selectedBook && <p className="text-[var(--text-muted)] text-xs mt-1">Sélectionnez un ouvrage</p>}
               </div>
 
               {/* Chapter Summary */}
               <div>
-                <h3 className="text-amber-400 font-semibold text-base mb-1">📄 Résumé du chapitre</h3>
-                <p className="text-zinc-500 text-sm mb-3">
-                  Que voulez-vous accomplir dans ce chapitre ? Scènes clés, objectifs narratifs…
+                <h3 className="text-[var(--text-primary)] font-semibold text-sm mb-1 tracking-tight">Résumé du chapitre</h3>
+                <p className="text-[var(--text-muted)] text-xs mb-3">
+                  Scènes clés, objectifs narratifs…
                 </p>
                 <textarea
-                  className="w-full min-h-[100px] p-3 bg-zinc-900 text-zinc-200 placeholder-zinc-600 rounded-lg border border-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed text-sm disabled:opacity-40"
-                  placeholder="Ex: Introduction du personnage principal. On découvre sa routine, ses obsessions. Première scène de tension avec le voisin mystérieux…"
+                  className="input-writer w-full min-h-[100px] p-4 text-[var(--text-secondary)] placeholder-[var(--text-muted)] rounded-xl resize-none leading-relaxed text-sm disabled:opacity-30"
+                  placeholder="Ex: Introduction du personnage principal. Première scène de tension…"
                   value={chapterSummary}
                   disabled={!selectedChapter}
                   onChange={(e) => {
@@ -887,48 +951,41 @@ export default function Home() {
                     }, 1000);
                   }}
                 />
-                {!selectedChapter && <p className="text-zinc-600 text-xs mt-1">Sélectionnez un chapitre pour écrire son résumé</p>}
+                {!selectedChapter && <p className="text-[var(--text-muted)] text-xs mt-1">Sélectionnez un chapitre</p>}
               </div>
 
               {/* Context status */}
-              <div className="mt-auto p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
-                <p className="text-zinc-400 text-xs font-medium mb-2">🎯 Contexte envoyé au critique :</p>
-                <div className="space-y-1">
-                  <p className="text-xs flex items-center gap-2">
-                    <span className={writerProfile ? 'text-green-400' : 'text-zinc-600'}>{writerProfile ? '✓' : '✗'}</span>
-                    <span className={writerProfile ? 'text-zinc-300' : 'text-zinc-600'}>Profil écrivain</span>
-                  </p>
-                  <p className="text-xs flex items-center gap-2">
-                    <span className={bookSummary ? 'text-green-400' : 'text-zinc-600'}>{bookSummary ? '✓' : '✗'}</span>
-                    <span className={bookSummary ? 'text-zinc-300' : 'text-zinc-600'}>Résumé ouvrage</span>
-                  </p>
-                  <p className="text-xs flex items-center gap-2">
-                    <span className={chapterSummary ? 'text-green-400' : 'text-zinc-600'}>{chapterSummary ? '✓' : '✗'}</span>
-                    <span className={chapterSummary ? 'text-zinc-300' : 'text-zinc-600'}>Résumé chapitre</span>
-                  </p>
-                  <p className="text-xs flex items-center gap-2">
-                    <span className={pastCritiques.length > 0 && textAtLastCritique !== null && text !== textAtLastCritique ? 'text-green-400' : 'text-zinc-600'}>
-                      {pastCritiques.length > 0 && textAtLastCritique !== null && text !== textAtLastCritique ? '✓' : '✗'}
-                    </span>
-                    <span className={pastCritiques.length > 0 ? 'text-zinc-300' : 'text-zinc-600'}>
-                      Historique critiques ({pastCritiques.length})
-                      {pastCritiques.length > 0 && textAtLastCritique !== null && text === textAtLastCritique && ' — texte non modifié'}
-                    </span>
-                  </p>
+              <div className="mt-auto p-4 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
+                <p className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase mb-3">Contexte actif</p>
+                <div className="space-y-2">
+                  {[
+                    { label: 'Profil écrivain', active: !!writerProfile },
+                    { label: 'Résumé ouvrage', active: !!bookSummary },
+                    { label: 'Résumé chapitre', active: !!chapterSummary },
+                    {
+                      label: `Historique (${pastCritiques.length})${pastCritiques.length > 0 && textAtLastCritique !== null && text === textAtLastCritique ? ' — non modifié' : ''}`,
+                      active: pastCritiques.length > 0 && textAtLastCritique !== null && text !== textAtLastCritique
+                    },
+                  ].map((item, i) => (
+                    <p key={i} className="text-xs flex items-center gap-2.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${item.active ? 'bg-emerald-400' : 'bg-[var(--text-muted)]/30'}`} />
+                      <span className={item.active ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'}>{item.label}</span>
+                    </p>
+                  ))}
                 </div>
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            <div className="flex-1 flex flex-col px-6 py-6 overflow-y-auto">
               <div className="mb-4">
-                <h3 className="text-amber-400 font-semibold text-base mb-1">🎭 Votre profil d&apos;écrivain</h3>
-                <p className="text-zinc-500 text-sm mb-4">
-                  Décrivez-vous : genre littéraire, niveau d&apos;expérience, objectifs, points forts, faiblesses connues… Le critique adaptera ses conseils en conséquence.
+                <h3 className="text-[var(--text-primary)] font-semibold text-sm mb-1 tracking-tight">Votre profil d&apos;écrivain</h3>
+                <p className="text-[var(--text-muted)] text-xs mb-4">
+                  Genre littéraire, niveau, objectifs, points forts et faiblesses. Le critique adaptera ses conseils.
                 </p>
               </div>
               <textarea
-                className="flex-1 min-h-[200px] p-4 bg-zinc-900 text-zinc-200 placeholder-zinc-600 rounded-lg border border-zinc-700 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed text-sm"
-                placeholder={"Ex: Je suis un auteur débutant en fantasy. J'écris un roman de dark fantasy inspiré par Joe Abercrombie et Robin Hobb. Mes points forts sont les dialogues, mes faiblesses les descriptions et le worldbuilding. Je souhaite progresser sur le rythme et la tension narrative."}
+                className="input-writer flex-1 min-h-[200px] p-4 text-[var(--text-secondary)] rounded-xl resize-none leading-relaxed text-sm"
+                placeholder={"Ex: Auteur débutant en dark fantasy, inspiré par Joe Abercrombie et Robin Hobb. Points forts : dialogues. Faiblesses : descriptions et worldbuilding."}
                 value={writerProfile}
                 onChange={(e) => {
                   setWriterProfile(e.target.value);
@@ -936,9 +993,12 @@ export default function Home() {
                 }}
               />
               <div className="mt-3 flex items-center justify-between">
-                <span className="text-zinc-600 text-xs">{writerProfile.length} caractères</span>
+                <span className="text-[var(--text-muted)] text-xs tabular-nums">{writerProfile.length} caractères</span>
                 {writerProfile && (
-                  <span className="text-green-500 text-xs">✓ Profil actif — sera pris en compte lors des critiques</span>
+                  <span className="text-emerald-400/70 text-xs flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    Profil actif
+                  </span>
                 )}
               </div>
             </div>
