@@ -245,7 +245,7 @@ REVIEWER_PROMPTS = {
         "Pour chaque problème identifié, donne un exercice concret ou une technique précise que l'auteur peut appliquer immédiatement. "
         "Cite des exemples issus de la littérature pour illustrer tes conseils.\n\n"
         "STYLE ET TON : Bienveillant, didactique, clair, encourageant mais rigoureux. Neutre stylistiquement.\n"
-        "EXEMPLES DE PHRASES :\n"
+        "EXEMPLES DE PHRASES  :\n"
         "- 'Regardons ensemble la structure de ce paragraphe.'\n"
         "- 'Ici, tu es dans le 'Tell' (dire). Essaie de passer au 'Show' (montrer).' \n"
         "- 'Un petit exercice pour toi : réécris cette scène sans utiliser d'adjectifs.'\n"
