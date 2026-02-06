@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: . # Build context is the project root
+      dockerfile: backend/Dockerfile # Dockerfile is in backend/
+    ports:
+      - "8000:8000"
+    environment:
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+    volumes:
+      - .:/app # Mount the entire project root to /app in container
+    command: ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  frontend:
+    build:
+      context: . # Build context is the project root
+      dockerfile: frontend/Dockerfile # Dockerfile is in frontend/
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app/frontend # Mount frontend code to /app/frontend
+      - /app/frontend/node_modules # Exclude node_modules from host mount
+    depends_on:
+      - backend
+    working_dir: /app/frontend
+    command: sh -c "pnpm install && pnpm dev"
