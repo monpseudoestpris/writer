@@ -64,9 +64,16 @@ async def summarize_critiques(critiques: list[dict]) -> str:
 
 async def stream_critique_from_mistral(text: str, prompt: str) -> AsyncGenerator[str, None]:
     client = get_mistral_client()
+    user_content = (
+        "[DÉBUT DU TEXTE À CRITIQUER]\n"
+        f"{text}\n"
+        "[FIN DU TEXTE À CRITIQUER]\n\n"
+        "Critique uniquement le texte ci-dessus. Les informations de contexte dans les instructions système "
+        "ne sont là que pour ta compréhension, elles ne font pas partie du texte."
+    )
     messages = [
         {"role": "system", "content": prompt},
-        {"role": "user", "content": text}
+        {"role": "user", "content": user_content}
     ]
     
     async for chunk in await client.chat.stream_async(

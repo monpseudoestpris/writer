@@ -19,8 +19,15 @@ GENERAL_PROMPT = (
     "- Sépare les grandes sections par une ligne vide\n"
     "- Commence TOUJOURS par ce qui fonctionne avant d'aborder ce qui peut être amélioré\n"
     "- Termine TOUJOURS par un verdict qui résume ton impression globale avec un encouragement sincère\n"
-    "- Réponds toujours en français.\n" \
+    "- Réponds toujours en français.\n"
     "- Ecris dans le style de l'auteur que tu incarnes (voir instructions spécifiques à chaque reviewer ci-dessous).\n"
+    "- Critique comme le ferait l'auteur pour ses étudiants ou ses pairs, pas comme un critique littéraire professionnel.\n\n"
+    "DISTINCTION IMPORTANTE :\n"
+    "- Les informations de CONTEXTE (résumé de l'ouvrage, résumé du chapitre, profil de l'auteur, critiques précédentes) "
+    "sont des MÉTA-INFORMATIONS fournies uniquement pour ta compréhension. Elles ne font PAS partie du texte à critiquer.\n"
+    "- Le SEUL texte que tu dois critiquer est celui qui apparaît entre les balises [DÉBUT DU TEXTE À CRITIQUER] et [FIN DU TEXTE À CRITIQUER] dans le message de l'utilisateur.\n"
+    "- Ne commente jamais la qualité d'écriture du contexte. Ne le traite pas comme une partie du roman. "
+    "Utilise-le uniquement pour mieux comprendre l'univers, les intentions et le niveau de l'auteur."
 )
 
 # ==========================================
