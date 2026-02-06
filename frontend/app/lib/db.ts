@@ -5,6 +5,7 @@ export interface Chapter {
   bookId: string;
   title: string;
   content: string;
+  summary: string;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -14,8 +15,19 @@ export interface Book {
   id: string;
   title: string;
   description: string;
+  summary: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface CritiqueEntry {
+  id: string;
+  chapterId: string;
+  reviewer: string;
+  critique: string;
+  summary: string;
+  textSnapshot: string;
+  createdAt: Date;
 }
 
 interface WriterDB extends DBSchema {
@@ -29,6 +41,15 @@ interface WriterDB extends DBSchema {
     value: Chapter;
     indexes: { 'by-book': string; 'by-order': [string, number] };
   };
+  settings: {
+    key: string;
+    value: { key: string; value: string };
+  };
+  critiques: {
+    key: string;
+    value: CritiqueEntry;
+    indexes: { 'by-chapter': string };
+  };
 }
 
 let dbInstance: IDBPDatabase<WriterDB> | null = null;
@@ -36,16 +57,27 @@ let dbInstance: IDBPDatabase<WriterDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<WriterDB>('writer-db', 1, {
-    upgrade(db) {
-      // Books store
-      const bookStore = db.createObjectStore('books', { keyPath: 'id' });
-      bookStore.createIndex('by-title', 'title');
+  dbInstance = await openDB<WriterDB>('writer-db', 3, {
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        // Books store
+        const bookStore = db.createObjectStore('books', { keyPath: 'id' });
+        bookStore.createIndex('by-title', 'title');
 
-      // Chapters store
-      const chapterStore = db.createObjectStore('chapters', { keyPath: 'id' });
-      chapterStore.createIndex('by-book', 'bookId');
-      chapterStore.createIndex('by-order', ['bookId', 'order']);
+        // Chapters store
+        const chapterStore = db.createObjectStore('chapters', { keyPath: 'id' });
+        chapterStore.createIndex('by-book', 'bookId');
+        chapterStore.createIndex('by-order', ['bookId', 'order']);
+      }
+      if (oldVersion < 2) {
+        // Settings store (for writer profile, etc.)
+        db.createObjectStore('settings', { keyPath: 'key' });
+      }
+      if (oldVersion < 3) {
+        // Critiques store
+        const critiqueStore = db.createObjectStore('critiques', { keyPath: 'id' });
+        critiqueStore.createIndex('by-chapter', 'chapterId');
+      }
     },
   });
 
@@ -59,6 +91,7 @@ export async function createBook(title: string, description: string = ''): Promi
     id: crypto.randomUUID(),
     title,
     description,
+    summary: '',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -76,7 +109,7 @@ export async function getBook(id: string): Promise<Book | undefined> {
   return db.get('books', id);
 }
 
-export async function updateBook(id: string, updates: Partial<Pick<Book, 'title' | 'description'>>): Promise<void> {
+export async function updateBook(id: string, updates: Partial<Pick<Book, 'title' | 'description' | 'summary'>>): Promise<void> {
   const db = await getDB();
   const book = await db.get('books', id);
   if (book) {
@@ -105,6 +138,7 @@ export async function createChapter(bookId: string, title: string, content: stri
     bookId,
     title,
     content,
+    summary: '',
     order: maxOrder + 1,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -124,7 +158,7 @@ export async function getChapter(id: string): Promise<Chapter | undefined> {
   return db.get('chapters', id);
 }
 
-export async function updateChapter(id: string, updates: Partial<Pick<Chapter, 'title' | 'content' | 'order'>>): Promise<void> {
+export async function updateChapter(id: string, updates: Partial<Pick<Chapter, 'title' | 'content' | 'summary' | 'order'>>): Promise<void> {
   const db = await getDB();
   const chapter = await db.get('chapters', id);
   if (chapter) {
@@ -134,9 +168,65 @@ export async function updateChapter(id: string, updates: Partial<Pick<Chapter, '
 
 export async function deleteChapter(id: string): Promise<void> {
   const db = await getDB();
+  await deleteCritiquesByChapter(id);
   await db.delete('chapters', id);
 }
 
 export async function saveChapterContent(id: string, content: string): Promise<void> {
   await updateChapter(id, { content });
+}
+
+// Settings
+export async function getWriterProfile(): Promise<string> {
+  const db = await getDB();
+  const entry = await db.get('settings', 'writerProfile');
+  return entry?.value ?? '';
+}
+
+export async function saveWriterProfile(profile: string): Promise<void> {
+  const db = await getDB();
+  await db.put('settings', { key: 'writerProfile', value: profile });
+}
+
+// Critiques
+export async function saveCritique(chapterId: string, reviewer: string, critique: string, textSnapshot: string): Promise<CritiqueEntry> {
+  const db = await getDB();
+  const entry: CritiqueEntry = {
+    id: crypto.randomUUID(),
+    chapterId,
+    reviewer,
+    critique,
+    summary: '',
+    textSnapshot,
+    createdAt: new Date(),
+  };
+  await db.put('critiques', entry);
+  return entry;
+}
+
+export async function updateCritiqueSummary(id: string, summary: string): Promise<void> {
+  const db = await getDB();
+  const entry = await db.get('critiques', id);
+  if (entry) {
+    await db.put('critiques', { ...entry, summary });
+  }
+}
+
+export async function getCritiquesByChapter(chapterId: string): Promise<CritiqueEntry[]> {
+  const db = await getDB();
+  const critiques = await db.getAllFromIndex('critiques', 'by-chapter', chapterId);
+  return critiques.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+export async function deleteCritique(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('critiques', id);
+}
+
+export async function deleteCritiquesByChapter(chapterId: string): Promise<void> {
+  const db = await getDB();
+  const critiques = await db.getAllFromIndex('critiques', 'by-chapter', chapterId);
+  for (const c of critiques) {
+    await db.delete('critiques', c.id);
+  }
 }

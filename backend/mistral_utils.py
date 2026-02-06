@@ -8,6 +8,60 @@ def get_mistral_client():
         raise ValueError("MISTRAL_API_KEY not found in environment variables.")
     return Mistral(api_key=api_key)
 
+async def summarize_single_critique(critique: str) -> str:
+    """Generate a short summary of a single critique using mistral-small-latest."""
+    client = get_mistral_client()
+    
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Résume cette critique littéraire de manière structurée en français. "
+                "Organise le résumé en sections claires : points forts, points faibles, suggestions principales. "
+                "Sois factuel et précis (300 mots max), sans formule de politesse."
+            )
+        },
+        {"role": "user", "content": critique}
+    ]
+    
+    response = await client.chat.complete_async(
+        model="mistral-small-latest",
+        messages=messages
+    )
+    
+    return response.choices[0].message.content
+
+
+async def summarize_critiques(critiques: list[dict]) -> str:
+    """Summarize previous critiques into a concise digest using mistral-small-latest."""
+    client = get_mistral_client()
+    
+    critiques_text = "\n\n".join(
+        f"Critique de {c.get('reviewer', 'inconnu')} :\n{c.get('critique', '')}"
+        for c in critiques
+    )
+    
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Tu es un assistant qui résume des critiques littéraires. "
+                "Fais une synthèse concise et structurée des critiques suivantes en français. "
+                "Regroupe par thème : points forts relevés, points faibles récurrents, suggestions principales. "
+                "Sois bref (200 mots max), factuel, et ne perds aucune information importante."
+            )
+        },
+        {"role": "user", "content": critiques_text}
+    ]
+    
+    response = await client.chat.complete_async(
+        model="mistral-small-latest",
+        messages=messages
+    )
+    
+    return response.choices[0].message.content
+
+
 async def stream_critique_from_mistral(text: str, prompt: str) -> AsyncGenerator[str, None]:
     client = get_mistral_client()
     messages = [
