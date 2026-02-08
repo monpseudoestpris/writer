@@ -172,8 +172,9 @@ export default function Home() {
   // UI
   const [showSidebar, setShowSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
-  const [editorWidth, setEditorWidth] = useState(50); // percentage
+  const [editorWidth, setEditorWidth] = useState(50); // percentage for both axes
   const [isDragging, setIsDragging] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const mainContentRef = useRef<HTMLDivElement>(null);
   const [newBookName, setNewBookName] = useState('');
   const [newChapterName, setNewChapterName] = useState('');
@@ -186,19 +187,21 @@ export default function Home() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!mainContentRef.current) return;
       const rect = mainContentRef.current.getBoundingClientRect();
-      const pct = ((e.clientX - rect.left) / rect.width) * 100;
-      setEditorWidth(Math.min(85, Math.max(25, pct)));
+      const pct = layoutMode === 'horizontal'
+        ? ((e.clientX - rect.left) / rect.width) * 100
+        : ((e.clientY - rect.top) / rect.height) * 100;
+      setEditorWidth(Math.min(85, Math.max(15, pct)));
     };
     const handleMouseUp = () => setIsDragging(false);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    document.body.classList.add('resizing-panels');
+    document.body.classList.add(layoutMode === 'horizontal' ? 'resizing-h' : 'resizing-v');
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      document.body.classList.remove('resizing-panels');
+      document.body.classList.remove('resizing-h', 'resizing-v');
     };
-  }, [isDragging]);
+  }, [isDragging, layoutMode]);
 
   // Summaries
   const [bookSummary, setBookSummary] = useState('');
@@ -631,9 +634,14 @@ export default function Home() {
       </button>
 
       {/* Main Content */}
-      <div className="flex-1 flex" ref={mainContentRef}>
-        {/* Left - Editor */}
-        <div className="flex flex-col" style={{ width: showRightPanel ? `${editorWidth}%` : '100%' }}>
+      <div className={`flex-1 flex ${layoutMode === 'vertical' ? 'flex-col' : ''}`} ref={mainContentRef}>
+        {/* Editor Panel */}
+        <div className="flex flex-col" style={{
+          ...(layoutMode === 'horizontal'
+            ? { width: showRightPanel ? `${editorWidth}%` : '100%' }
+            : { height: showRightPanel ? `${editorWidth}%` : '100%', width: '100%' }
+          )
+        }}>
           {/* Toolbar */}
           <div className="flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
             <span className="text-[var(--text-muted)] text-sm font-medium tracking-tight">
@@ -642,50 +650,58 @@ export default function Home() {
             
             {saving && <span className="text-[var(--accent)]/50 text-xs">Sauvegarde…</span>}
             
-            <button
-              onClick={() => setShowRightPanel(p => !p)}
-              className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-xs px-1.5"
-              title={showRightPanel ? 'Masquer le panneau critique' : 'Afficher le panneau critique'}
-            >
-              {showRightPanel ? '⟫' : '⟪'}
-            </button>
-            
             <div className="flex items-center gap-1.5 ml-auto">
               <button
+                onClick={() => setShowRightPanel(p => !p)}
+                className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm px-1.5"
+                title={showRightPanel ? 'Masquer le panneau critique' : 'Afficher le panneau critique'}
+              >
+                {showRightPanel ? '⟫' : '⟪'}
+              </button>
+              <button
+                onClick={() => setLayoutMode(m => m === 'horizontal' ? 'vertical' : 'horizontal')}
+                className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm px-1.5"
+                title={layoutMode === 'horizontal' ? 'Passer en mode haut/bas' : 'Passer en mode gauche/droite'}
+              >
+                {layoutMode === 'horizontal' ? '⬒' : '⬓'}
+              </button>
+
+              <div className="w-px h-6 bg-[var(--border-subtle)] mx-1" />
+              <button
                 onClick={toggleBold}
-                className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-sm font-bold transition-colors"
+                className="w-9 h-9 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-bold transition-colors border border-[var(--border-subtle)]"
                 title="Gras (Ctrl+B)"
               >
                 B
               </button>
               <button
                 onClick={toggleItalic}
-                className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-sm italic transition-colors"
+                className="w-9 h-9 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base italic transition-colors border border-[var(--border-subtle)]"
                 title="Italique (Ctrl+I)"
               >
                 I
               </button>
               <button
                 onClick={toggleUnderline}
-                className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-sm underline transition-colors"
+                className="w-9 h-9 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base underline transition-colors border border-[var(--border-subtle)]"
                 title="Souligné (Ctrl+U)"
               >
                 U
               </button>
               
-              <div className="w-px h-5 bg-[var(--border-subtle)] mx-1" />
+              <div className="w-px h-6 bg-[var(--border-subtle)] mx-1.5" />
               
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-1">
                 <button
                   onClick={() => setFontSize(f => Math.max(12, f - 2))}
-                  className="w-7 h-7 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] text-xs transition-colors"
+                  className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-medium transition-colors border border-[var(--border-subtle)]"
                 >
                   −
                 </button>
-                <span className="w-7 text-center text-[var(--text-muted)] text-xs tabular-nums">{fontSize}</span>
+                <span className="w-8 text-center text-[var(--text-primary)] text-sm font-medium tabular-nums">{fontSize}</span>
                 <button
                   onClick={() => setFontSize(f => Math.min(32, f + 2))}
-                  className="w-7 h-7 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] text-xs transition-colors"
+                  className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-medium transition-colors border border-[var(--border-subtle)]"
                 >
                   +
                 </button>
@@ -742,16 +758,18 @@ export default function Home() {
 
         {/* Full-screen overlay during drag to capture all mouse events */}
         {isDragging && (
-          <div className="fixed inset-0 z-50" style={{ cursor: 'col-resize' }} />
+          <div className="fixed inset-0 z-50" style={{ cursor: layoutMode === 'horizontal' ? 'col-resize' : 'row-resize' }} />
         )}
 
         {/* Draggable Divider */}
         {showRightPanel && (
           <div
             style={{
-              width: '6px',
+              ...(layoutMode === 'horizontal'
+                ? { width: '6px', height: '100%', cursor: 'col-resize' }
+                : { height: '6px', width: '100%', cursor: 'row-resize' }
+              ),
               flexShrink: 0,
-              cursor: 'col-resize',
               backgroundColor: isDragging ? '#c9a55a' : '#333',
               position: 'relative',
               zIndex: 10,
@@ -763,9 +781,14 @@ export default function Home() {
           />
         )}
 
-        {/* Right - Critique / Profil */}
+        {/* Critique Panel */}
         {showRightPanel && (
-        <div className="flex flex-col bg-[var(--bg-primary)]" style={{ width: `${100 - editorWidth}%` }}>
+        <div className="flex flex-col bg-[var(--bg-primary)]" style={{
+          ...(layoutMode === 'horizontal'
+            ? { width: `${100 - editorWidth}%` }
+            : { height: `${100 - editorWidth}%`, width: '100%' }
+          )
+        }}>
           {/* Tabs */}
           <div className="flex-shrink-0 flex border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
             <button

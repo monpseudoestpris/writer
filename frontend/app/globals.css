@@ -166,7 +166,11 @@ html, body {
 }
 
 /* Force cursor during panel resize */
-body.resizing-panels, body.resizing-panels * {
+body.resizing-h, body.resizing-h * {
   cursor: col-resize !important;
+  user-select: none !important;
+}
+body.resizing-v, body.resizing-v * {
+  cursor: row-resize !important;
   user-select: none !important;
 }
