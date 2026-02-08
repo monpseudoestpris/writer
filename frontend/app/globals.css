@@ -164,3 +164,9 @@ html, body {
   background: linear-gradient(90deg, transparent, rgba(201, 165, 90, 0.15), transparent);
   height: 1px;
 }
+
+/* Force cursor during panel resize */
+body.resizing-panels, body.resizing-panels * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}

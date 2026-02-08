@@ -171,10 +171,34 @@ export default function Home() {
 
   // UI
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showRightPanel, setShowRightPanel] = useState(true);
+  const [editorWidth, setEditorWidth] = useState(50); // percentage
+  const [isDragging, setIsDragging] = useState(false);
+  const mainContentRef = useRef<HTMLDivElement>(null);
   const [newBookName, setNewBookName] = useState('');
   const [newChapterName, setNewChapterName] = useState('');
   const [rightTab, setRightTab] = useState<'critique' | 'profil' | 'contexte'>('critique');
   const [writerProfile, setWriterProfile] = useState('');
+
+  // Drag to resize panels
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!mainContentRef.current) return;
+      const rect = mainContentRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      setEditorWidth(Math.min(85, Math.max(25, pct)));
+    };
+    const handleMouseUp = () => setIsDragging(false);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.classList.add('resizing-panels');
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.classList.remove('resizing-panels');
+    };
+  }, [isDragging]);
 
   // Summaries
   const [bookSummary, setBookSummary] = useState('');
@@ -224,6 +248,9 @@ export default function Home() {
   // Load chapter content + summary + critiques when chapter ID changes
   const selectedChapterId = selectedChapter?.id;
   useEffect(() => {
+    // Flush any pending save for the previous chapter
+    flushSave.current();
+
     if (selectedChapter && selectedChapterId) {
       setText(selectedChapter.content);
       if (editorRef.current) {
@@ -253,6 +280,37 @@ export default function Home() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChapterId]);
+
+  // Immediate save helper (flushes pending debounce)
+  const flushSave = useRef<() => void>(() => {});
+  useEffect(() => {
+    flushSave.current = () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      if (selectedChapter && editorRef.current) {
+        const currentContent = editorRef.current.innerHTML;
+        if (currentContent !== selectedChapter.content) {
+          saveChapterContent(selectedChapter.id, currentContent);
+        }
+      }
+    };
+  });
+
+  // Save on tab close / hide
+  useEffect(() => {
+    const handleBeforeUnload = () => flushSave.current();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushSave.current();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // Auto-save with debounce
   useEffect(() => {
@@ -573,9 +631,9 @@ export default function Home() {
       </button>
 
       {/* Main Content */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex" ref={mainContentRef}>
         {/* Left - Editor */}
-        <div className="w-1/2 flex flex-col">
+        <div className="flex flex-col" style={{ width: showRightPanel ? `${editorWidth}%` : '100%' }}>
           {/* Toolbar */}
           <div className="flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
             <span className="text-[var(--text-muted)] text-sm font-medium tracking-tight">
@@ -583,6 +641,14 @@ export default function Home() {
             </span>
             
             {saving && <span className="text-[var(--accent)]/50 text-xs">Sauvegarde…</span>}
+            
+            <button
+              onClick={() => setShowRightPanel(p => !p)}
+              className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-xs px-1.5"
+              title={showRightPanel ? 'Masquer le panneau critique' : 'Afficher le panneau critique'}
+            >
+              {showRightPanel ? '⟫' : '⟪'}
+            </button>
             
             <div className="flex items-center gap-1.5 ml-auto">
               <button
@@ -625,7 +691,7 @@ export default function Home() {
                 </button>
               </div>
               
-              <span className="text-[var(--text-muted)] text-[11px] ml-2 tabular-nums">{htmlToPlainText(text).length}</span>
+              <span className="text-[var(--text-muted)] text-[11px] ml-2 tabular-nums">{(() => { const t = htmlToPlainText(text); const w = t.trim() ? t.trim().split(/\s+/).length : 0; return `${w} mot${w > 1 ? 's' : ''} · ${t.length} car.`; })()}</span>
             </div>
           </div>
 
@@ -674,11 +740,32 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Divider */}
-        <div className="w-px flex-shrink-0 bg-gradient-to-b from-transparent via-[var(--accent)]/20 to-transparent" />
+        {/* Full-screen overlay during drag to capture all mouse events */}
+        {isDragging && (
+          <div className="fixed inset-0 z-50" style={{ cursor: 'col-resize' }} />
+        )}
+
+        {/* Draggable Divider */}
+        {showRightPanel && (
+          <div
+            style={{
+              width: '6px',
+              flexShrink: 0,
+              cursor: 'col-resize',
+              backgroundColor: isDragging ? '#c9a55a' : '#333',
+              position: 'relative',
+              zIndex: 10,
+              transition: 'background-color 0.15s',
+            }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+            onMouseEnter={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = '#c9a55a'; }}
+            onMouseLeave={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = '#333'; }}
+          />
+        )}
 
         {/* Right - Critique / Profil */}
-        <div className="w-1/2 flex flex-col bg-[var(--bg-primary)]">
+        {showRightPanel && (
+        <div className="flex flex-col bg-[var(--bg-primary)]" style={{ width: `${100 - editorWidth}%` }}>
           {/* Tabs */}
           <div className="flex-shrink-0 flex border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
             <button
@@ -822,87 +909,52 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Past critiques list */}
+              {/* Past critiques dropdown */}
               {pastCritiques.length > 0 && !loading && (
-                <div className="flex-shrink-0 border-t border-[var(--border-subtle)] max-h-[40%] overflow-y-auto">
-                  <div className="px-5 py-2 sticky top-0 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)] z-10">
-                    <span className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase">Historique</span>
-                  </div>
-                  {[...pastCritiques].reverse().map((pc, idx) => {
-                    const critiqueNum = pastCritiques.length - idx;
-                    const isViewing = viewingCritiqueId === pc.id;
-                    return (
-                      <div
-                        key={pc.id}
-                        className={`w-full text-left px-5 py-3 border-b border-[var(--border-subtle)] transition-all ${
-                          isViewing ? 'bg-[var(--accent-glow)] border-l-2 border-l-[var(--accent)]' : 'hover:bg-[var(--bg-elevated)]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <button
-                            onClick={() => { setViewingCritiqueId(isViewing ? null : pc.id); setViewingSummary(false); }}
-                            className="flex-1 text-left"
-                          >
-                            <span className={`text-sm font-medium ${isViewing ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
-                              #{critiqueNum} — {pc.reviewer}
-                            </span>
-                          </button>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-[var(--text-muted)] text-[11px]">
-                              {new Date(pc.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('Supprimer cette critique ?')) {
-                                  deleteCritique(pc.id).then(() => {
-                                    setPastCritiques(prev => prev.filter(c => c.id !== pc.id));
-                                    if (viewingCritiqueId === pc.id) setViewingCritiqueId(null);
-                                  });
-                                }
-                              }}
-                              className="text-[var(--text-muted)] hover:text-red-400 transition-colors px-1"
-                              title="Supprimer"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <button
-                            onClick={() => { setViewingCritiqueId(isViewing ? null : pc.id); setViewingSummary(false); }}
-                            className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-                          >
-                            {isViewing ? '▲ Masquer' : '▶ Voir la critique'}
-                          </button>
-                          {pc.summary && (
-                            <>
-                              <span className="text-[var(--border-medium)] text-[10px]">·</span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setExpandedSummaries(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(pc.id)) next.delete(pc.id);
-                                    else next.add(pc.id);
-                                    return next;
-                                  });
-                                }}
-                                className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-                              >
-                                {expandedSummaries.has(pc.id) ? '▲ Masquer le résumé' : 'Résumé'}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                        {expandedSummaries.has(pc.id) && pc.summary && (
-                          <div className="mt-3 p-4 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl critique-content">
-                            {pc.summary.split('\n').map((line, i) => renderCritiqueLine(line, i))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-5 py-2.5 bg-[var(--bg-secondary)] flex items-center gap-2">
+                  <span className="text-[var(--text-muted)] text-[11px] tracking-widest uppercase flex-shrink-0">Historique</span>
+                  <select
+                    className="input-writer flex-1 px-2 py-1.5 text-sm rounded-lg text-[var(--text-secondary)] truncate"
+                    value={viewingCritiqueId || ''}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setViewingCritiqueId(id || null);
+                      setViewingSummary(false);
+                      if (id) {
+                        const pc = pastCritiques.find(c => c.id === id);
+                        if (pc) setCritique(pc.critique);
+                      }
+                    }}
+                  >
+                    <option value="">— Sélectionner —</option>
+                    {[...pastCritiques].reverse().map((pc, idx) => {
+                      const num = pastCritiques.length - idx;
+                      const date = new Date(pc.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <option key={pc.id} value={pc.id}>
+                          #{num} — {pc.reviewer} — {date}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {viewingCritiqueId && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm('Supprimer cette critique ?')) {
+                          deleteCritique(viewingCritiqueId).then(() => {
+                            setPastCritiques(prev => prev.filter(c => c.id !== viewingCritiqueId));
+                            setViewingCritiqueId(null);
+                            setCritique('');
+                          });
+                        }
+                      }}
+                      className="text-[var(--text-muted)] hover:text-red-400 transition-colors text-xs flex-shrink-0 px-1"
+                      title="Supprimer cette critique"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1004,6 +1056,7 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
