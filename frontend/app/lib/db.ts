@@ -42,6 +42,14 @@ export interface WorldBuildingEntry {
   updatedAt: Date;
 }
 
+export interface WBFeedbackEntry {
+  id: string;
+  wbEntryId: string;
+  reviewer: string;
+  feedback: string;
+  createdAt: Date;
+}
+
 export const WB_CATEGORIES = [
   { id: 'monde', label: 'Monde', icon: '🌍' },
   { id: 'personnages', label: 'Personnages', icon: '👤' },
@@ -84,6 +92,11 @@ interface WriterDB extends DBSchema {
     value: WorldBuildingEntry;
     indexes: { 'by-book': string; 'by-category': [string, string] };
   };
+  wbFeedbacks: {
+    key: string;
+    value: WBFeedbackEntry;
+    indexes: { 'by-entry': string };
+  };
 }
 
 let dbInstance: IDBPDatabase<WriterDB> | null = null;
@@ -91,8 +104,9 @@ let dbInstance: IDBPDatabase<WriterDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<WriterDB>('writer-db', 4, {
+  dbInstance = await openDB<WriterDB>('writer-db', 5, {
     upgrade(db, oldVersion) {
+      console.log(`[DB] Upgrading from v${oldVersion} to v5`);
       if (oldVersion < 1) {
         // Books store
         const bookStore = db.createObjectStore('books', { keyPath: 'id' });
@@ -118,8 +132,30 @@ export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
         wbStore.createIndex('by-book', 'bookId');
         wbStore.createIndex('by-category', ['bookId', 'category']);
       }
+      if (oldVersion < 5) {
+        // WB Feedbacks store
+        const wbfStore = db.createObjectStore('wbFeedbacks', { keyPath: 'id' });
+        wbfStore.createIndex('by-entry', 'wbEntryId');
+      }
+    },
+    blocked() {
+      console.warn('[DB] Upgrade blocked — close other tabs using this app and refresh.');
+      alert('La base de données doit être mise à jour. Fermez les autres onglets de l\'application puis rechargez cette page.');
+      dbInstance = null;
+    },
+    blocking() {
+      // This tab is blocking another tab from upgrading
+      console.warn('[DB] This tab is blocking a DB upgrade — closing connection.');
+      dbInstance?.close();
+      dbInstance = null;
+    },
+    terminated() {
+      console.warn('[DB] Connection terminated unexpectedly.');
+      dbInstance = null;
     },
   });
+
+  console.log('[DB] Opened successfully at v5');
 
   return dbInstance;
 }
@@ -322,6 +358,7 @@ export async function updateWorldBuildingEntry(
 
 export async function deleteWorldBuildingEntry(id: string): Promise<void> {
   const db = await getDB();
+  await deleteWBFeedbacksByEntry(id);
   await db.delete('worldBuilding', id);
 }
 
@@ -329,7 +366,41 @@ export async function deleteWorldBuildingByBook(bookId: string): Promise<void> {
   const db = await getDB();
   const entries = await db.getAllFromIndex('worldBuilding', 'by-book', bookId);
   for (const e of entries) {
+    await deleteWBFeedbacksByEntry(e.id);
     await db.delete('worldBuilding', e.id);
+  }
+}
+
+// WB Feedbacks
+export async function saveWBFeedback(wbEntryId: string, reviewer: string, feedback: string): Promise<WBFeedbackEntry> {
+  const db = await getDB();
+  const entry: WBFeedbackEntry = {
+    id: crypto.randomUUID(),
+    wbEntryId,
+    reviewer,
+    feedback,
+    createdAt: new Date(),
+  };
+  await db.put('wbFeedbacks', entry);
+  return entry;
+}
+
+export async function getWBFeedbacksByEntry(wbEntryId: string): Promise<WBFeedbackEntry[]> {
+  const db = await getDB();
+  const feedbacks = await db.getAllFromIndex('wbFeedbacks', 'by-entry', wbEntryId);
+  return feedbacks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function deleteWBFeedback(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('wbFeedbacks', id);
+}
+
+export async function deleteWBFeedbacksByEntry(wbEntryId: string): Promise<void> {
+  const db = await getDB();
+  const feedbacks = await db.getAllFromIndex('wbFeedbacks', 'by-entry', wbEntryId);
+  for (const f of feedbacks) {
+    await db.delete('wbFeedbacks', f.id);
   }
 }
 
@@ -344,25 +415,28 @@ export interface WriterExport {
   chapters: Chapter[];
   critiques: CritiqueEntry[];
   worldBuilding: WorldBuildingEntry[];
+  wbFeedbacks: WBFeedbackEntry[];
   settings: { key: string; value: string }[];
 }
 
 export async function exportDatabase(): Promise<WriterExport> {
   const db = await getDB();
-  const [books, chapters, critiques, worldBuilding, settings] = await Promise.all([
+  const [books, chapters, critiques, worldBuilding, wbFeedbacks, settings] = await Promise.all([
     db.getAll('books'),
     db.getAll('chapters'),
     db.getAll('critiques'),
     db.getAll('worldBuilding'),
+    db.getAll('wbFeedbacks'),
     db.getAll('settings'),
   ]);
   return {
-    version: 4,
+    version: 5,
     exportedAt: new Date().toISOString(),
     books,
     chapters,
     critiques,
     worldBuilding,
+    wbFeedbacks,
     settings,
   };
 }
@@ -387,18 +461,19 @@ export async function importDatabase(data: WriterExport): Promise<{ books: numbe
   const db = await getDB();
 
   // Clear existing data
-  const tx = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'settings'], 'readwrite');
+  const tx = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'wbFeedbacks', 'settings'], 'readwrite');
   await Promise.all([
     tx.objectStore('books').clear(),
     tx.objectStore('chapters').clear(),
     tx.objectStore('critiques').clear(),
     tx.objectStore('worldBuilding').clear(),
+    tx.objectStore('wbFeedbacks').clear(),
     tx.objectStore('settings').clear(),
   ]);
   await tx.done;
 
   // Import all records
-  const txImport = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'settings'], 'readwrite');
+  const txImport = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'wbFeedbacks', 'settings'], 'readwrite');
   for (const book of data.books) {
     await txImport.objectStore('books').put(book);
   }
@@ -410,6 +485,9 @@ export async function importDatabase(data: WriterExport): Promise<{ books: numbe
   }
   for (const wb of (data.worldBuilding || [])) {
     await txImport.objectStore('worldBuilding').put(wb);
+  }
+  for (const wbf of (data.wbFeedbacks || [])) {
+    await txImport.objectStore('wbFeedbacks').put(wbf);
   }
   for (const setting of (data.settings || [])) {
     await txImport.objectStore('settings').put(setting);

@@ -3,11 +3,15 @@
 import { useState, useEffect, useRef, ReactNode } from 'react';
 import {
   WorldBuildingEntry,
+  WBFeedbackEntry,
   WB_CATEGORIES,
   getWorldBuildingByBook,
   createWorldBuildingEntry,
   updateWorldBuildingEntry,
   deleteWorldBuildingEntry,
+  getWBFeedbacksByEntry,
+  saveWBFeedback,
+  deleteWBFeedback,
 } from '../lib/db';
 
 // Inline markdown renderer (same logic as page.tsx)
@@ -84,6 +88,8 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
   const [editContent, setEditContent] = useState('');
   const [editTitle, setEditTitle] = useState('');
   const [aiFeedback, setAiFeedback] = useState('');
+  const [feedbackHistory, setFeedbackHistory] = useState<WBFeedbackEntry[]>([]);
+  const [viewingFeedbackId, setViewingFeedbackId] = useState<string | null>(null);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
   const [loadingAutofill, setLoadingAutofill] = useState(false);
   const [selectedReviewer, setSelectedReviewer] = useState<string>('');
@@ -92,6 +98,10 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const titleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Refs to track latest values for unmount flush
+  const selectedEntryRef = useRef<WorldBuildingEntry | null>(null);
+  const editContentRef = useRef('');
+  const editTitleRef = useRef('');
 
   // Drag to resize editor/feedback split
   useEffect(() => {
@@ -115,11 +125,42 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   // Load entries when bookId changes
   useEffect(() => {
+    // Flush any pending save before loading new book
+    if (selectedEntryRef.current) {
+      updateWorldBuildingEntry(selectedEntryRef.current.id, {
+        content: editContentRef.current,
+        title: editTitleRef.current,
+      });
+    }
     loadEntries();
     setSelectedEntry(null);
+    selectedEntryRef.current = null;
     setAiFeedback('');
+    setFeedbackHistory([]);
+    setViewingFeedbackId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId]);
+
+  // Flush pending saves on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      if (titleTimeoutRef.current) {
+        clearTimeout(titleTimeoutRef.current);
+        titleTimeoutRef.current = null;
+      }
+      // Save latest content/title to DB on unmount
+      if (selectedEntryRef.current) {
+        updateWorldBuildingEntry(selectedEntryRef.current.id, {
+          content: editContentRef.current,
+          title: editTitleRef.current,
+        });
+      }
+    };
+  }, []);
 
   const loadEntries = async () => {
     const all = await getWorldBuildingByBook(bookId);
@@ -168,23 +209,37 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   const handleCreateEntry = async () => {
     if (!addingToCategory || !newEntryTitle.trim()) return;
-    const entry = await createWorldBuildingEntry(bookId, addingToCategory, newEntryTitle.trim());
-    setEntries(prev => [...prev, entry]);
-    setAddingToCategory(null);
-    setNewEntryTitle('');
-    setSelectedEntry(entry);
-    setEditContent('');
-    setEditTitle(entry.title);
-    setAiFeedback('');
+    try {
+      const entry = await createWorldBuildingEntry(bookId, addingToCategory, newEntryTitle.trim());
+      setEntries(prev => [...prev, entry]);
+      setAddingToCategory(null);
+      setNewEntryTitle('');
+      setSelectedEntry(entry);
+      selectedEntryRef.current = entry;
+      setEditContent('');
+      editContentRef.current = '';
+      setEditTitle(entry.title);
+      editTitleRef.current = entry.title;
+      setAiFeedback('');
+    } catch (e) {
+      console.error('[WB] Failed to create entry:', e);
+      alert('Erreur lors de la cr\u00e9ation. V\u00e9rifiez la console (F12) et rechargez la page.');
+    }
   };
 
   const handleSelectEntry = (entry: WorldBuildingEntry) => {
     // Save current entry before switching
     flushSave();
     setSelectedEntry(entry);
+    selectedEntryRef.current = entry;
     setEditContent(entry.content);
+    editContentRef.current = entry.content;
     setEditTitle(entry.title);
-    setAiFeedback(entry.aiFeedback || '');
+    editTitleRef.current = entry.title;
+    setAiFeedback('');
+    setViewingFeedbackId(null);
+    // Load feedback history
+    getWBFeedbacksByEntry(entry.id).then(setFeedbackHistory);
   };
 
   const handleDeleteEntry = async (entryId: string) => {
@@ -193,9 +248,14 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     setEntries(prev => prev.filter(e => e.id !== entryId));
     if (selectedEntry?.id === entryId) {
       setSelectedEntry(null);
+      selectedEntryRef.current = null;
       setEditContent('');
+      editContentRef.current = '';
       setEditTitle('');
+      editTitleRef.current = '';
       setAiFeedback('');
+      setFeedbackHistory([]);
+      setViewingFeedbackId(null);
     }
   };
 
@@ -215,6 +275,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   const handleContentChange = (value: string) => {
     setEditContent(value);
+    editContentRef.current = value;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => {
       if (selectedEntry) {
@@ -226,6 +287,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   const handleTitleChange = (value: string) => {
     setEditTitle(value);
+    editTitleRef.current = value;
     if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
     titleTimeoutRef.current = setTimeout(() => {
       if (selectedEntry) {
@@ -278,8 +340,15 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
         setAiFeedback(prev => prev + chunk);
       }
 
-      // Save feedback to DB
+      // Save feedback to DB as a new history entry
       if (fullFeedback) {
+        const reviewerName = selectedReviewer
+          ? (reviewers.find(r => r.id === selectedReviewer)?.name || selectedReviewer)
+          : 'Consultant générique';
+        const saved = await saveWBFeedback(selectedEntry.id, reviewerName, fullFeedback);
+        setFeedbackHistory(prev => [saved, ...prev]);
+        setViewingFeedbackId(saved.id);
+        // Also keep on entry for the indicator
         await updateWorldBuildingEntry(selectedEntry.id, { aiFeedback: fullFeedback });
         setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, aiFeedback: fullFeedback } : e));
       }
@@ -566,11 +635,14 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
               />
 
               {/* AI Feedback section */}
-              <div className="min-h-0 overflow-y-auto" style={{ height: `${100 - editorHeight}%` }}>
-                <div className="px-6 py-4">
-                  <div className="flex items-center justify-between mb-3">
+              <div className="min-h-0 overflow-hidden flex flex-col" style={{ height: `${100 - editorHeight}%` }}>
+                <div className="px-6 py-3 flex-shrink-0 border-b border-[var(--border-subtle)]">
+                  <div className="flex items-center justify-between">
                     <label className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase flex items-center gap-2">
                       <span className="text-base">✦</span> Avis IA
+                      {feedbackHistory.length > 0 && (
+                        <span className="text-[var(--text-muted)]/60 text-[10px] font-normal normal-case tracking-normal">({feedbackHistory.length})</span>
+                      )}
                     </label>
                     <div className="flex items-center gap-2">
                       <select
@@ -584,7 +656,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                         ))}
                       </select>
                       <button
-                        onClick={handleGetFeedback}
+                        onClick={() => { setViewingFeedbackId(null); setAiFeedback(''); handleGetFeedback(); }}
                         disabled={loadingFeedback || loadingAutofill || !editContent.trim()}
                         className="px-4 py-2 bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-xs font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                       >
@@ -592,20 +664,75 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                       </button>
                     </div>
                   </div>
+                </div>
 
-                  {(aiFeedback || loadingFeedback) ? (
-                    <div className="p-5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
-                      <div className="critique-content">
-                        {aiFeedback.split('\n').map((line, i) => renderFeedbackLine(line, i))}
-                        {loadingFeedback && <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-5 bg-[var(--bg-surface)]/50 border border-dashed border-[var(--border-subtle)] rounded-xl text-center">
-                      <p className="text-[var(--text-muted)] text-sm">Cliquez sur « Demander un avis » pour obtenir un retour IA sur cet élément</p>
-                      <p className="text-[var(--text-muted)]/60 text-xs mt-1">L&apos;IA analysera la cohérence, l&apos;originalité et proposera des améliorations</p>
+                <div className="flex-1 flex overflow-hidden">
+                  {/* Feedback history sidebar */}
+                  {feedbackHistory.length > 0 && (
+                    <div className="w-48 flex-shrink-0 border-r border-[var(--border-subtle)] overflow-y-auto bg-[var(--bg-secondary)]">
+                      {feedbackHistory.map((fb) => {
+                        const isActive = viewingFeedbackId === fb.id;
+                        const date = new Date(fb.createdAt);
+                        return (
+                          <div
+                            key={fb.id}
+                            className={`px-3 py-2.5 cursor-pointer border-b border-[var(--border-subtle)] transition-all group ${
+                              isActive
+                                ? 'bg-[var(--accent-glow)] border-l-2 border-l-[var(--accent)]'
+                                : 'hover:bg-[var(--bg-surface)] border-l-2 border-l-transparent'
+                            }`}
+                            onClick={() => {
+                              setViewingFeedbackId(fb.id);
+                              setAiFeedback(fb.feedback);
+                            }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className={`text-xs font-medium truncate ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
+                                {fb.reviewer}
+                              </span>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!confirm('Supprimer cet avis ?')) return;
+                                  await deleteWBFeedback(fb.id);
+                                  setFeedbackHistory(prev => prev.filter(f => f.id !== fb.id));
+                                  if (viewingFeedbackId === fb.id) {
+                                    setViewingFeedbackId(null);
+                                    setAiFeedback('');
+                                  }
+                                }}
+                                className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-[10px] transition-opacity flex-shrink-0 ml-1"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                              {date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {' · '}
+                              {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
+
+                  {/* Feedback content */}
+                  <div className="flex-1 overflow-y-auto px-6 py-4">
+                    {(aiFeedback || loadingFeedback) ? (
+                      <div className="p-5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
+                        <div className="critique-content">
+                          {aiFeedback.split('\n').map((line, i) => renderFeedbackLine(line, i))}
+                          {loadingFeedback && <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-5 bg-[var(--bg-surface)]/50 border border-dashed border-[var(--border-subtle)] rounded-xl text-center">
+                        <p className="text-[var(--text-muted)] text-sm">Cliquez sur « Demander un avis » pour obtenir un retour IA sur cet élément</p>
+                        <p className="text-[var(--text-muted)]/60 text-xs mt-1">L&apos;IA analysera la cohérence, l&apos;originalité et proposera des améliorations</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
