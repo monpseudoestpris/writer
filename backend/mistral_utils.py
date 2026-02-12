@@ -82,3 +82,19 @@ async def stream_critique_from_mistral(text: str, prompt: str) -> AsyncGenerator
     ):
         if chunk.data.choices[0].delta.content:
             yield chunk.data.choices[0].delta.content
+
+
+async def stream_from_mistral_small(system_prompt: str, user_content: str) -> AsyncGenerator[str, None]:
+    """Stream a response from mistral-small-latest (cheaper, faster, for auto-fill tasks)."""
+    client = get_mistral_client()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    
+    async for chunk in await client.chat.stream_async(
+        model="mistral-small-latest",
+        messages=messages
+    ):
+        if chunk.data.choices[0].delta.content:
+            yield chunk.data.choices[0].delta.content

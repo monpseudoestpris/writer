@@ -30,6 +30,35 @@ export interface CritiqueEntry {
   createdAt: Date;
 }
 
+export interface WorldBuildingEntry {
+  id: string;
+  bookId: string;
+  category: string;
+  title: string;
+  content: string;
+  aiFeedback: string;
+  order: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const WB_CATEGORIES = [
+  { id: 'monde', label: 'Monde', icon: '🌍' },
+  { id: 'personnages', label: 'Personnages', icon: '👤' },
+  { id: 'lieux', label: 'Lieux', icon: '📍' },
+  { id: 'nature', label: 'Nature', icon: '🌿' },
+  { id: 'animaux', label: 'Animaux', icon: '🐾' },
+  { id: 'politique', label: 'Politique', icon: '🏛️' },
+  { id: 'magie', label: 'Magie', icon: '✨' },
+  { id: 'science', label: 'Science', icon: '🔬' },
+  { id: 'histoire', label: 'Histoire', icon: '📜' },
+  { id: 'cultures', label: 'Cultures', icon: '🎭' },
+  { id: 'religions', label: 'Religions', icon: '🕯️' },
+  { id: 'objets', label: 'Objets', icon: '🗡️' },
+  { id: 'langues', label: 'Langues', icon: '💬' },
+  { id: 'autre', label: 'Autre', icon: '📝' },
+] as const;
+
 interface WriterDB extends DBSchema {
   books: {
     key: string;
@@ -50,6 +79,11 @@ interface WriterDB extends DBSchema {
     value: CritiqueEntry;
     indexes: { 'by-chapter': string };
   };
+  worldBuilding: {
+    key: string;
+    value: WorldBuildingEntry;
+    indexes: { 'by-book': string; 'by-category': [string, string] };
+  };
 }
 
 let dbInstance: IDBPDatabase<WriterDB> | null = null;
@@ -57,7 +91,7 @@ let dbInstance: IDBPDatabase<WriterDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<WriterDB>('writer-db', 3, {
+  dbInstance = await openDB<WriterDB>('writer-db', 4, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
         // Books store
@@ -77,6 +111,12 @@ export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
         // Critiques store
         const critiqueStore = db.createObjectStore('critiques', { keyPath: 'id' });
         critiqueStore.createIndex('by-chapter', 'chapterId');
+      }
+      if (oldVersion < 4) {
+        // World Building store
+        const wbStore = db.createObjectStore('worldBuilding', { keyPath: 'id' });
+        wbStore.createIndex('by-book', 'bookId');
+        wbStore.createIndex('by-category', ['bookId', 'category']);
       }
     },
   });
@@ -124,6 +164,8 @@ export async function deleteBook(id: string): Promise<void> {
   for (const chapter of chapters) {
     await db.delete('chapters', chapter.id);
   }
+  // Delete all world building entries of this book
+  await deleteWorldBuildingByBook(id);
   await db.delete('books', id);
 }
 
@@ -231,6 +273,66 @@ export async function deleteCritiquesByChapter(chapterId: string): Promise<void>
   }
 }
 
+// World Building
+export async function createWorldBuildingEntry(
+  bookId: string,
+  category: string,
+  title: string,
+  content: string = ''
+): Promise<WorldBuildingEntry> {
+  const db = await getDB();
+  const existing = await getWorldBuildingByBook(bookId);
+  const sameCat = existing.filter(e => e.category === category);
+  const maxOrder = sameCat.length > 0 ? Math.max(...sameCat.map(e => e.order)) : -1;
+
+  const entry: WorldBuildingEntry = {
+    id: crypto.randomUUID(),
+    bookId,
+    category,
+    title,
+    content,
+    aiFeedback: '',
+    order: maxOrder + 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await db.put('worldBuilding', entry);
+  return entry;
+}
+
+export async function getWorldBuildingByBook(bookId: string): Promise<WorldBuildingEntry[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('worldBuilding', 'by-book', bookId);
+  return entries.sort((a, b) => {
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    return a.order - b.order;
+  });
+}
+
+export async function updateWorldBuildingEntry(
+  id: string,
+  updates: Partial<Pick<WorldBuildingEntry, 'title' | 'content' | 'aiFeedback' | 'order'>>
+): Promise<void> {
+  const db = await getDB();
+  const entry = await db.get('worldBuilding', id);
+  if (entry) {
+    await db.put('worldBuilding', { ...entry, ...updates, updatedAt: new Date() });
+  }
+}
+
+export async function deleteWorldBuildingEntry(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('worldBuilding', id);
+}
+
+export async function deleteWorldBuildingByBook(bookId: string): Promise<void> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('worldBuilding', 'by-book', bookId);
+  for (const e of entries) {
+    await db.delete('worldBuilding', e.id);
+  }
+}
+
 // ==========================================
 // EXPORT / IMPORT
 // ==========================================
@@ -241,23 +343,26 @@ export interface WriterExport {
   books: Book[];
   chapters: Chapter[];
   critiques: CritiqueEntry[];
+  worldBuilding: WorldBuildingEntry[];
   settings: { key: string; value: string }[];
 }
 
 export async function exportDatabase(): Promise<WriterExport> {
   const db = await getDB();
-  const [books, chapters, critiques, settings] = await Promise.all([
+  const [books, chapters, critiques, worldBuilding, settings] = await Promise.all([
     db.getAll('books'),
     db.getAll('chapters'),
     db.getAll('critiques'),
+    db.getAll('worldBuilding'),
     db.getAll('settings'),
   ]);
   return {
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     books,
     chapters,
     critiques,
+    worldBuilding,
     settings,
   };
 }
@@ -282,17 +387,18 @@ export async function importDatabase(data: WriterExport): Promise<{ books: numbe
   const db = await getDB();
 
   // Clear existing data
-  const tx = db.transaction(['books', 'chapters', 'critiques', 'settings'], 'readwrite');
+  const tx = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'settings'], 'readwrite');
   await Promise.all([
     tx.objectStore('books').clear(),
     tx.objectStore('chapters').clear(),
     tx.objectStore('critiques').clear(),
+    tx.objectStore('worldBuilding').clear(),
     tx.objectStore('settings').clear(),
   ]);
   await tx.done;
 
   // Import all records
-  const txImport = db.transaction(['books', 'chapters', 'critiques', 'settings'], 'readwrite');
+  const txImport = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'settings'], 'readwrite');
   for (const book of data.books) {
     await txImport.objectStore('books').put(book);
   }
@@ -301,6 +407,9 @@ export async function importDatabase(data: WriterExport): Promise<{ books: numbe
   }
   for (const critique of (data.critiques || [])) {
     await txImport.objectStore('critiques').put(critique);
+  }
+  for (const wb of (data.worldBuilding || [])) {
+    await txImport.objectStore('worldBuilding').put(wb);
   }
   for (const setting of (data.settings || [])) {
     await txImport.objectStore('settings').put(setting);

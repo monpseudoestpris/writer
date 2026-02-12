@@ -10,6 +10,7 @@ import {
   saveCritique, getCritiquesByChapter, updateCritiqueSummary, deleteCritique,
   exportDatabase, downloadExport, importDatabase, WriterExport
 } from './lib/db';
+import WorldBuilding from './components/WorldBuilding';
 
 type Reviewer = { id: string; name: string };
 
@@ -180,6 +181,7 @@ export default function Home() {
   const [newChapterName, setNewChapterName] = useState('');
   const [rightTab, setRightTab] = useState<'critique' | 'profil' | 'contexte'>('critique');
   const [writerProfile, setWriterProfile] = useState('');
+  const [sidebarView, setSidebarView] = useState<'chapters' | 'worldbuilding'>('chapters');
 
   // Drag to resize panels
   useEffect(() => {
@@ -240,6 +242,7 @@ export default function Home() {
     if (selectedBook) {
       loadChapters(selectedBook.id);
       setBookSummary(selectedBook.summary || '');
+      setSidebarView('chapters');
     } else {
       setChapters([]);
       setSelectedChapter(null);
@@ -455,6 +458,74 @@ export default function Home() {
     }
   };
 
+  const handleDialogue = async () => {
+    const plainText = htmlToPlainText(text);
+    if (!plainText.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    setCritique('');
+    setViewingCritiqueId(null);
+    setRightTab('critique');
+
+    try {
+      const response = await fetch('http://localhost:8000/review-dialogue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: plainText,
+          writer_profile: writerProfile || null,
+          book_summary: bookSummary || null,
+          chapter_summary: chapterSummary || null,
+          num_authors: 3,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("Pas de stream disponible");
+
+      let fullCritique = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullCritique += chunk;
+        setCritique(prev => prev + chunk);
+      }
+
+      // Save as "dialogue" critique
+      if (selectedChapter && fullCritique) {
+        const entry = await saveCritique(selectedChapter.id, 'dialogue_random', fullCritique, text);
+        setPastCritiques(prev => [...prev, entry]);
+
+        // Generate summary in background via mistral-small
+        fetch('http://localhost:8000/summarize-critique', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ critique: fullCritique }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.summary) {
+              updateCritiqueSummary(entry.id, data.summary);
+              setPastCritiques(prev =>
+                prev.map(c => c.id === entry.id ? { ...c, summary: data.summary } : c)
+              );
+            }
+          })
+          .catch(() => {});
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Une erreur est survenue.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const toggleBold = () => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -531,6 +602,32 @@ export default function Home() {
                 {/* Chapters */}
                 {selectedBook?.id === book.id && (
                   <div className="ml-3 pl-3 border-l border-[var(--border-subtle)]">
+                    {/* View toggle: Chapters / World Building */}
+                    <div className="flex gap-1 my-2">
+                      <button
+                        onClick={() => setSidebarView('chapters')}
+                        className={`flex-1 px-2 py-1.5 text-[10px] font-medium tracking-wide uppercase rounded-md transition-all ${
+                          sidebarView === 'chapters'
+                            ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'
+                        }`}
+                      >
+                        Chapitres
+                      </button>
+                      <button
+                        onClick={() => { setSidebarView('worldbuilding'); setSelectedChapter(null); }}
+                        className={`flex-1 px-2 py-1.5 text-[10px] font-medium tracking-wide uppercase rounded-md transition-all ${
+                          sidebarView === 'worldbuilding'
+                            ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'
+                        }`}
+                      >
+                        🌍 Univers
+                      </button>
+                    </div>
+
+                    {sidebarView === 'chapters' && (
+                      <>
                     {chapters.map(chapter => (
                       <div
                         key={chapter.id}
@@ -570,6 +667,8 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -634,6 +733,11 @@ export default function Home() {
       </button>
 
       {/* Main Content */}
+      {sidebarView === 'worldbuilding' && selectedBook ? (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <WorldBuilding bookId={selectedBook.id} bookSummary={bookSummary} reviewers={reviewers} />
+        </div>
+      ) : (
       <div className={`flex-1 flex ${layoutMode === 'vertical' ? 'flex-col' : ''}`} ref={mainContentRef}>
         {/* Editor Panel */}
         <div className="flex flex-col" style={{
@@ -752,6 +856,14 @@ export default function Home() {
               disabled={loading || !text}
             >
               {loading ? 'Analyse en cours…' : 'Obtenir une critique'}
+            </button>
+            <button
+              className="py-2.5 px-4 rounded-lg text-sm font-medium transition-all border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)]/15"
+              onClick={handleDialogue}
+              disabled={loading || !text}
+              title="3 auteurs au hasard débattent de votre texte"
+            >
+              {loading ? '…' : '🎲 Random'}
             </button>
           </div>
         </div>
@@ -1081,6 +1193,7 @@ export default function Home() {
         </div>
         )}
       </div>
+      )}
     </div>
   );
 }
