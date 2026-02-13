@@ -32,6 +32,32 @@ async def summarize_single_critique(critique: str) -> str:
     return response.choices[0].message.content
 
 
+async def summarize_text(text: str) -> str:
+    """Generate a factual 5-10 line summary of a text using mistral-small-latest."""
+    client = get_mistral_client()
+    
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Tu es un assistant qui résume des textes littéraires de manière factuelle et concise. "
+                "Produis un résumé en 5 à 10 lignes qui capture les informations essentielles : "
+                "personnages présents, lieux, actions principales, enjeux narratifs, éléments de world building. "
+                "Sois strictement factuel : ne juge pas, ne commente pas la qualité, ne donne aucun avis. "
+                "Résume uniquement ce qui est écrit. Écris en français."
+            )
+        },
+        {"role": "user", "content": text}
+    ]
+    
+    response = await client.chat.complete_async(
+        model="mistral-small-latest",
+        messages=messages
+    )
+    
+    return response.choices[0].message.content
+
+
 async def summarize_critiques(critiques: list[dict]) -> str:
     """Summarize previous critiques into a concise digest using mistral-small-latest."""
     client = get_mistral_client()

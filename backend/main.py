@@ -3,9 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
-from backend.models import ReviewRequest, SummarizeRequest, DialogueRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest
-from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, stream_from_mistral_small
-from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS
+from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest
+from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small
+from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT
 
 load_dotenv()
 
@@ -100,6 +100,15 @@ async def summarize_critique_endpoint(request: SummarizeRequest):
         return {"summary": "", "error": str(e)}
 
 
+@app.post("/summarize-text")
+async def summarize_text_endpoint(request: SummarizeTextRequest):
+    try:
+        summary = await summarize_text(request.text)
+        return {"summary": summary}
+    except Exception as e:
+        return {"summary": "", "error": str(e)}
+
+
 @app.post("/review-dialogue")
 async def review_dialogue(request: DialogueRequest):
     import random
@@ -151,6 +160,28 @@ async def review_dialogue(request: DialogueRequest):
     )
 
 
+@app.post("/review-readers")
+async def review_readers(request: ReadersReviewRequest):
+    """Panel de lecteurs aléatoires qui donnent leur avis."""
+    readers_system = READERS_PANEL_PROMPT.format(nb_readers=request.num_readers)
+    
+    parts = [readers_system]
+    
+    if request.book_summary:
+        parts.append(f"\n\nRÉSUMÉ DE L'OUVRAGE : {request.book_summary}")
+    if request.chapter_summary:
+        parts.append(f"\n\nRÉSUMÉ DU CHAPITRE : {request.chapter_summary}")
+    if request.writer_profile:
+        parts.append(f"\n\nProfil de l'auteur : {request.writer_profile}")
+    
+    full_prompt = "".join(parts)
+    
+    return StreamingResponse(
+        stream_critique_from_mistral(request.text, full_prompt),
+        media_type="text/plain"
+    )
+
+
 @app.post("/world-building/feedback")
 async def world_building_feedback(request: WorldBuildingFeedbackRequest):
     prompt_text = WORLD_BUILDING_FEEDBACK_PROMPT.format(
@@ -187,6 +218,128 @@ async def world_building_feedback(request: WorldBuildingFeedbackRequest):
     return StreamingResponse(
         stream_critique_from_mistral(request.entry_content, full_prompt),
         media_type="text/plain"
+    )
+
+
+@app.post("/world-building/readers")
+async def world_building_readers(request: WBReadersReviewRequest):
+    """Panel de lecteurs aléatoires pour le world building."""
+    readers_system = WB_READERS_PANEL_PROMPT.format(
+        nb_readers=request.num_readers,
+        category=request.category,
+        title=request.entry_title,
+    )
+    
+    parts = [readers_system]
+    
+    if request.book_summary:
+        parts.append(f"\n\nRÉSUMÉ DE L'OUVRAGE : {request.book_summary}")
+    
+    if request.all_entries_context:
+        parts.append(f"\n\nAUTRES ÉLÉMENTS DE L'UNIVERS :\n{request.all_entries_context}")
+    
+    full_prompt = "".join(parts)
+    
+    return StreamingResponse(
+        stream_critique_from_mistral(request.entry_content, full_prompt),
+        media_type="text/plain"
+    )
+
+
+@app.post("/review-panel")
+async def review_custom_panel(request: PanelReviewRequest):
+    """Panel personnalisé d'auteurs choisis par l'utilisateur."""
+    # Filter valid reviewer IDs
+    chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
+    if not chosen:
+        async def error_stream():
+            yield "Aucun auteur valide dans votre panel. Configurez votre panel dans les param\u00e8tres."
+        return StreamingResponse(error_stream(), media_type="text/plain")
+    
+    n = len(chosen)
+    authors_list = "\n".join(
+        f"- {REVIEWER_FIRST_NAMES.get(rid, rid)} ({REVIEWER_NAMES.get(rid, rid)})"
+        for rid in chosen
+    )
+    authors_personalities = "\n\n".join(
+        f"{REVIEWER_FIRST_NAMES.get(rid, rid)} :\n{REVIEWER_PROMPTS[rid]}"
+        for rid in chosen
+    )
+    
+    panel_system = CUSTOM_PANEL_PROMPT.format(
+        nb_authors=n,
+        authors_list=authors_list,
+        authors_personalities=authors_personalities
+    )
+    
+    parts = [panel_system]
+    if request.book_summary:
+        parts.append(f"\n\nR\u00c9SUM\u00c9 DE L'OUVRAGE : {request.book_summary}")
+    if request.chapter_summary:
+        parts.append(f"\n\nR\u00c9SUM\u00c9 DU CHAPITRE : {request.chapter_summary}")
+    if request.writer_profile:
+        parts.append(f"\n\nProfil de l'auteur : {request.writer_profile}")
+    
+    full_prompt = "".join(parts)
+    chosen_names = [REVIEWER_FIRST_NAMES.get(rid, rid) for rid in chosen]
+    
+    async def stream_with_header():
+        yield f"*\u2b50 Votre panel : {', '.join(chosen_names)} prennent place autour de votre texte\u2026*\n\n---\n\n"
+        async for chunk in stream_critique_from_mistral(request.text, full_prompt):
+            yield chunk
+    
+    return StreamingResponse(
+        stream_with_header(),
+        media_type="text/plain",
+        headers={"X-Panel-Authors": ",".join(chosen)}
+    )
+
+
+@app.post("/world-building/panel")
+async def world_building_custom_panel(request: WBPanelReviewRequest):
+    """Panel personnalisé d'auteurs pour le world building."""
+    chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
+    if not chosen:
+        async def error_stream():
+            yield "Aucun auteur valide dans votre panel. Configurez votre panel dans les param\u00e8tres."
+        return StreamingResponse(error_stream(), media_type="text/plain")
+    
+    n = len(chosen)
+    authors_list = "\n".join(
+        f"- {REVIEWER_FIRST_NAMES.get(rid, rid)} ({REVIEWER_NAMES.get(rid, rid)})"
+        for rid in chosen
+    )
+    authors_personalities = "\n\n".join(
+        f"{REVIEWER_FIRST_NAMES.get(rid, rid)} :\n{REVIEWER_PROMPTS[rid]}"
+        for rid in chosen
+    )
+    
+    panel_system = WB_CUSTOM_PANEL_PROMPT.format(
+        nb_authors=n,
+        authors_list=authors_list,
+        authors_personalities=authors_personalities,
+        category=request.category,
+        title=request.entry_title
+    )
+    
+    parts = [panel_system]
+    if request.book_summary:
+        parts.append(f"\n\nR\u00c9SUM\u00c9 DE L'OUVRAGE : {request.book_summary}")
+    if request.all_entries_context:
+        parts.append(f"\n\nAUTRES \u00c9L\u00c9MENTS DE L'UNIVERS :\n{request.all_entries_context}")
+    
+    full_prompt = "".join(parts)
+    chosen_names = [REVIEWER_FIRST_NAMES.get(rid, rid) for rid in chosen]
+    
+    async def stream_with_header():
+        yield f"*\u2b50 Votre panel : {', '.join(chosen_names)} examinent votre univers\u2026*\n\n---\n\n"
+        async for chunk in stream_critique_from_mistral(request.entry_content, full_prompt):
+            yield chunk
+    
+    return StreamingResponse(
+        stream_with_header(),
+        media_type="text/plain",
+        headers={"X-Panel-Authors": ",".join(chosen)}
     )
 
 

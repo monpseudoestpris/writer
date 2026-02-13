@@ -12,7 +12,11 @@ import {
   getWBFeedbacksByEntry,
   saveWBFeedback,
   deleteWBFeedback,
+  getFavoritePanel,
+  saveFavoritePanel,
 } from '../lib/db';
+import RichEditor, { EditorToolbar } from './RichEditor';
+import type { Editor } from '@tiptap/react';
 
 // Inline markdown renderer (same logic as page.tsx)
 function renderInline(text: string): ReactNode {
@@ -29,6 +33,73 @@ function renderInline(text: string): ReactNode {
     }
     return <span key={i}>{part}</span>;
   });
+}
+
+// Render a markdown table from grouped lines
+function renderMarkdownTable(lines: string[], keyBase: number): ReactNode {
+  const parseRow = (line: string) =>
+    line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+
+  const rows = lines.filter(l => !/^\|?\s*[-:]+[-|:\s]*\|?\s*$/.test(l));
+  if (rows.length === 0) return null;
+
+  const header = parseRow(rows[0]);
+  const body = rows.slice(1).map(parseRow);
+
+  return (
+    <div key={`table-${keyBase}`} className="my-4 overflow-x-auto rounded-lg border border-[var(--border-subtle)]">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="bg-[var(--bg-surface)]">
+            {header.map((cell, j) => (
+              <th key={j} className="px-4 py-2.5 text-left text-xs font-bold text-[var(--accent)] uppercase tracking-wider border-b border-[var(--border-subtle)]">
+                {renderInline(cell)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? 'bg-[var(--bg-primary)]' : 'bg-[var(--bg-surface)]/50'}>
+              {row.map((cell, ci) => (
+                <td key={ci} className="px-4 py-2 text-[var(--text-secondary)] border-b border-[var(--border-subtle)]/50 leading-relaxed">
+                  {renderInline(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Render full markdown content with table support
+function renderMarkdownContent(text: string, lineRenderer: (line: string, i: number) => ReactNode): ReactNode[] {
+  const lines = text.split('\n');
+  const elements: ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/\|/.test(line) && !/^[-*_]{3,}$/.test(line.trim())) {
+      const tableLines: string[] = [];
+      while (i < lines.length && /\|/.test(lines[i]) && !/^[-*_]{3,}$/.test(lines[i].trim())) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      if (tableLines.length >= 3 && tableLines.some(l => /^\|?\s*[-:]+[-|:\s]*\|?\s*$/.test(l))) {
+        elements.push(renderMarkdownTable(tableLines, i));
+      } else {
+        tableLines.forEach((tl, ti) => elements.push(lineRenderer(tl, i - tableLines.length + ti)));
+      }
+    } else {
+      elements.push(lineRenderer(line, i));
+      i++;
+    }
+  }
+
+  return elements;
 }
 
 function renderFeedbackLine(line: string, i: number): ReactNode {
@@ -72,6 +143,13 @@ function renderFeedbackLine(line: string, i: number): ReactNode {
 
 type Reviewer = { id: string; name: string };
 
+const htmlToPlainText = (html: string): string => {
+  if (typeof document === 'undefined') return html.replace(/<[^>]*>/g, '');
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return div.innerText || div.textContent || '';
+};
+
 interface Props {
   bookId: string;
   bookSummary: string;
@@ -93,11 +171,23 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
   const [loadingFeedback, setLoadingFeedback] = useState(false);
   const [loadingAutofill, setLoadingAutofill] = useState(false);
   const [selectedReviewer, setSelectedReviewer] = useState<string>('');
-  const [editorHeight, setEditorHeight] = useState(50); // percentage for vertical split
+  const [showWBPanel, setShowWBPanel] = useState(true);
+  const [feedbackFullscreen, setFeedbackFullscreen] = useState(false);
+  const [editorFullscreen, setEditorFullscreen] = useState(false);
+  const [showFeedbackPanel, setShowFeedbackPanel] = useState(true);
+  const [wbLayoutMode, setWbLayoutMode] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [editorHeight, setEditorHeight] = useState(50); // percentage for both axes
   const [isDragging, setIsDragging] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const wbEditorRef = useRef<Editor | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const titleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [textSummary, setTextSummary] = useState('');
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [showSummaryPopup, setShowSummaryPopup] = useState(false);
+  const [summaryHeight, setSummaryHeight] = useState(250);
+  const [favoritePanel, setFavoritePanel] = useState<string[]>([]);
+  const [showPanelConfig, setShowPanelConfig] = useState(false);
   // Refs to track latest values for unmount flush
   const selectedEntryRef = useRef<WorldBuildingEntry | null>(null);
   const editContentRef = useRef('');
@@ -109,19 +199,24 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     const handleMouseMove = (e: MouseEvent) => {
       if (!splitContainerRef.current) return;
       const rect = splitContainerRef.current.getBoundingClientRect();
-      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      let pct: number;
+      if (wbLayoutMode === 'horizontal') {
+        pct = ((e.clientX - rect.left) / rect.width) * 100;
+      } else {
+        pct = ((e.clientY - rect.top) / rect.height) * 100;
+      }
       setEditorHeight(Math.min(85, Math.max(15, pct)));
     };
     const handleMouseUp = () => setIsDragging(false);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    document.body.classList.add('resizing-v');
+    document.body.classList.add(wbLayoutMode === 'horizontal' ? 'resizing-h' : 'resizing-v');
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      document.body.classList.remove('resizing-v');
+      document.body.classList.remove('resizing-h', 'resizing-v');
     };
-  }, [isDragging]);
+  }, [isDragging, wbLayoutMode]);
 
   // Load entries when bookId changes
   useEffect(() => {
@@ -133,11 +228,13 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
       });
     }
     loadEntries();
+    getFavoritePanel().then(p => { if (p.length) setFavoritePanel(p); });
     setSelectedEntry(null);
     selectedEntryRef.current = null;
     setAiFeedback('');
     setFeedbackHistory([]);
     setViewingFeedbackId(null);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId]);
 
@@ -221,6 +318,8 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
       setEditTitle(entry.title);
       editTitleRef.current = entry.title;
       setAiFeedback('');
+      // Clear the editor
+      // TipTap handles this via content prop
     } catch (e) {
       console.error('[WB] Failed to create entry:', e);
       alert('Erreur lors de la cr\u00e9ation. V\u00e9rifiez la console (F12) et rechargez la page.');
@@ -238,8 +337,11 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     editTitleRef.current = entry.title;
     setAiFeedback('');
     setViewingFeedbackId(null);
+    setTextSummary(entry.textSummary || '');
+    setShowSummaryPopup(false);
     // Load feedback history
     getWBFeedbacksByEntry(entry.id).then(setFeedbackHistory);
+    // TipTap handles content via prop
   };
 
   const handleDeleteEntry = async (entryId: string) => {
@@ -298,16 +400,49 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     }, 800);
   };
 
+  // Generate text summary via AI
+  const handleGenerateWBSummary = async () => {
+    const plainText = htmlToPlainText(editContent);
+    if (!plainText.trim() || !selectedEntry) return;
+    setIsGeneratingSummary(true);
+    try {
+      const response = await fetch('http://localhost:8000/summarize-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: plainText }),
+      });
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+      const data = await response.json();
+      if (data.summary) {
+        setTextSummary(data.summary);
+        await updateWorldBuildingEntry(selectedEntry.id, { textSummary: data.summary });
+        setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, textSummary: data.summary } : e));
+        setShowSummaryPopup(true);
+      }
+    } catch (e: unknown) {
+      console.error('Erreur génération résumé WB:', e);
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
   const handleGetFeedback = async () => {
-    if (!selectedEntry || !editContent.trim()) return;
+    if (!selectedEntry || !htmlToPlainText(editContent).trim()) return;
     setLoadingFeedback(true);
-    setAiFeedback('');
+
+    // Prepend text summary to feedback if available
+    const summaryHeader = textSummary
+      ? `**📋 Résumé du texte :**\n${textSummary}\n\n---\n\n`
+      : '';
+    setAiFeedback(summaryHeader);
+
+    const plainContent = htmlToPlainText(editContent);
 
     // Build FULL context from all other entries (no truncation for mistral-large-latest)
     const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
     const contextParts = otherEntries.map(e => {
       const cat = getCategoryInfo(e.category);
-      return `[${cat.label}] ${e.title} :\n${e.content}`;
+      return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
     });
     const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
 
@@ -317,7 +452,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           entry_title: editTitle,
-          entry_content: editContent,
+          entry_content: plainContent,
           category: getCategoryInfo(selectedEntry.category).label,
           reviewer: selectedReviewer || null,
           book_summary: bookSummary || null,
@@ -331,7 +466,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
       const decoder = new TextDecoder();
       if (!reader) throw new Error('Pas de stream disponible');
 
-      let fullFeedback = '';
+      let fullFeedback = summaryHeader;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -360,15 +495,149 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     }
   };
 
+  const handleWBReadersPanel = async () => {
+    if (!selectedEntry || !htmlToPlainText(editContent).trim()) return;
+    setLoadingFeedback(true);
+
+    const summaryHeader = textSummary
+      ? `**📋 Résumé du texte :**\n${textSummary}\n\n---\n\n`
+      : '';
+    setAiFeedback(summaryHeader);
+
+    const plainContent = htmlToPlainText(editContent);
+
+    const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
+    const contextParts = otherEntries.map(e => {
+      const cat = getCategoryInfo(e.category);
+      return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
+    });
+    const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
+
+    try {
+      const response = await fetch('http://localhost:8000/world-building/readers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_title: editTitle,
+          entry_content: plainContent,
+          category: getCategoryInfo(selectedEntry.category).label,
+          book_summary: bookSummary || null,
+          all_entries_context: allEntriesContext,
+          num_readers: 5,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('Pas de stream disponible');
+
+      let fullFeedback = summaryHeader;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullFeedback += chunk;
+        setAiFeedback(prev => prev + chunk);
+      }
+
+      if (fullFeedback) {
+        const saved = await saveWBFeedback(selectedEntry.id, 'Panel de lecteurs', fullFeedback);
+        setFeedbackHistory(prev => [saved, ...prev]);
+        setViewingFeedbackId(saved.id);
+        await updateWorldBuildingEntry(selectedEntry.id, { aiFeedback: fullFeedback });
+        setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, aiFeedback: fullFeedback } : e));
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erreur';
+      setAiFeedback(`Erreur : ${msg}`);
+    } finally {
+      setLoadingFeedback(false);
+    }
+  };
+
+  const handleWBCustomPanel = async () => {
+    if (!selectedEntry || !htmlToPlainText(editContent).trim() || favoritePanel.length === 0) return;
+    setLoadingFeedback(true);
+
+    const summaryHeader = textSummary
+      ? `**📋 Résumé du texte :**\n${textSummary}\n\n---\n\n`
+      : '';
+    setAiFeedback(summaryHeader);
+
+    const plainContent = htmlToPlainText(editContent);
+
+    const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
+    const contextParts = otherEntries.map(e => {
+      const cat = getCategoryInfo(e.category);
+      return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
+    });
+    const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
+
+    try {
+      const response = await fetch('http://localhost:8000/world-building/panel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_title: editTitle,
+          entry_content: plainContent,
+          category: getCategoryInfo(selectedEntry.category).label,
+          reviewer_ids: favoritePanel,
+          book_summary: bookSummary || null,
+          all_entries_context: allEntriesContext,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('Pas de stream disponible');
+
+      let fullFeedback = summaryHeader;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullFeedback += chunk;
+        setAiFeedback(prev => prev + chunk);
+      }
+
+      if (fullFeedback) {
+        const saved = await saveWBFeedback(selectedEntry.id, 'Mon panel', fullFeedback);
+        setFeedbackHistory(prev => [saved, ...prev]);
+        setViewingFeedbackId(saved.id);
+        await updateWorldBuildingEntry(selectedEntry.id, { aiFeedback: fullFeedback });
+        setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, aiFeedback: fullFeedback } : e));
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erreur';
+      setAiFeedback(`Erreur : ${msg}`);
+    } finally {
+      setLoadingFeedback(false);
+    }
+  };
+
+  const togglePanelMember = async (id: string) => {
+    const updated = favoritePanel.includes(id)
+      ? favoritePanel.filter(r => r !== id)
+      : [...favoritePanel, id];
+    setFavoritePanel(updated);
+    await saveFavoritePanel(updated);
+  };
+
   const handleAutofill = async () => {
     if (!selectedEntry) return;
     setLoadingAutofill(true);
+
+    const plainContent = htmlToPlainText(editContent);
 
     // Build context from all other entries (full content)
     const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
     const contextParts = otherEntries.map(e => {
       const cat = getCategoryInfo(e.category);
-      return `[${cat.label}] ${e.title} :\n${e.content}`;
+      return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
     });
     const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
 
@@ -378,7 +647,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           entry_title: editTitle,
-          entry_content: editContent || null,
+          entry_content: plainContent || null,
           category: selectedEntry.category,
           book_summary: bookSummary || null,
           all_entries_context: allEntriesContext,
@@ -392,9 +661,10 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
       if (!reader) throw new Error('Pas de stream disponible');
 
       // If there's existing content, append after a separator
-      let newContent = editContent;
-      if (newContent.trim()) {
-        newContent += '\n\n--- Complété par IA ---\n\n';
+      const currentHtml = wbEditorRef.current?.getHTML() || editContent;
+      const hasPriorContent = htmlToPlainText(currentHtml).trim().length > 0;
+      if (hasPriorContent && wbEditorRef.current) {
+        wbEditorRef.current.commands.setContent(currentHtml + '<br><br><hr><p><em>Complété par IA :</em></p>');
       }
 
       let generated = '';
@@ -403,18 +673,21 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         generated += chunk;
-        const fullContent = editContent.trim()
-          ? editContent + '\n\n--- Complété par IA ---\n\n' + generated
-          : generated;
-        setEditContent(fullContent);
+        // Convert newlines to <br> for display
+        const generatedHtml = generated.replace(/\n/g, '<br>');
+        if (wbEditorRef.current) {
+          const prefix = hasPriorContent
+            ? currentHtml + '<br><br><hr><p><em>Complété par IA :</em></p>'
+            : '';
+          wbEditorRef.current.commands.setContent(prefix + generatedHtml);
+        }
       }
 
       // Save to DB
-      const finalContent = editContent.trim()
-        ? editContent + '\n\n--- Complété par IA ---\n\n' + generated
-        : generated;
-      await updateWorldBuildingEntry(selectedEntry.id, { content: finalContent });
-      setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, content: finalContent, updatedAt: new Date() } : e));
+      const finalHtml = wbEditorRef.current?.getHTML() || '';
+      handleContentChange(finalHtml);
+      await updateWorldBuildingEntry(selectedEntry.id, { content: finalHtml });
+      setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, content: finalHtml, updatedAt: new Date() } : e));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erreur';
       alert(`Erreur auto-fill : ${msg}`);
@@ -426,7 +699,8 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Left: Categories & Entries list */}
-      <div className="w-72 flex-shrink-0 border-r border-[var(--border-subtle)] flex flex-col bg-[var(--bg-secondary)]">
+      <div style={{ width: showWBPanel ? '20rem' : '0px', transition: 'width 200ms ease' }} className="flex-shrink-0 border-r border-[var(--border-subtle)] flex flex-col bg-[var(--bg-secondary)] overflow-hidden">
+        <div className="w-80 h-full flex flex-col">
         {/* Header */}
         <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between">
           <h2 className="text-[var(--text-primary)] font-semibold text-sm tracking-tight flex items-center gap-2">
@@ -440,17 +714,25 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
               + Ajouter
             </button>
             {showAddMenu && (
-              <div className="absolute right-0 top-full mt-1 w-52 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-xl shadow-2xl z-50 py-1.5 max-h-80 overflow-y-auto">
-                {WB_CATEGORIES.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => handleAddCategory(cat.id)}
-                    className="w-full px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent)]/10 transition-colors flex items-center gap-2.5"
-                  >
-                    <span className="text-base">{cat.icon}</span>
-                    <span>{cat.label}</span>
-                  </button>
-                ))}
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowAddMenu(false)}>
+                <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-3xl shadow-2xl w-[90vw] max-w-[1200px] max-h-[90vh] overflow-y-auto py-8" onClick={e => e.stopPropagation()}>
+                  <div className="px-10 pb-5 mb-5 border-b border-[var(--border-subtle)]">
+                    <h3 className="text-[var(--text-primary)] font-bold text-3xl">Ajouter un élément</h3>
+                    <p className="text-[var(--text-muted)] text-lg mt-2">Choisissez une catégorie pour votre univers</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 px-10">
+                    {WB_CATEGORIES.map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => handleAddCategory(cat.id)}
+                        className="px-6 py-5 text-left text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent)]/10 rounded-2xl transition-colors flex items-center gap-4 border border-transparent hover:border-[var(--accent)]/30"
+                      >
+                        <span className="text-5xl">{cat.icon}</span>
+                        <span className="text-xl font-semibold">{cat.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -475,12 +757,12 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                 {/* Category header */}
                 <button
                   onClick={() => toggleCategory(catId)}
-                  className="w-full px-3 py-2 flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] rounded-lg transition-all"
+                  className="w-full px-3 py-2 flex items-center gap-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-surface)] rounded-lg transition-all"
                 >
-                  <span className="text-xs text-[var(--text-muted)] transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
-                  <span className="text-base">{catInfo.icon}</span>
-                  <span>{catInfo.label}</span>
-                  <span className="ml-auto text-[var(--text-muted)] text-xs">{catEntries.length}</span>
+                  <span className="text-sm text-[var(--text-muted)] transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                  <span className="text-lg">{catInfo.icon}</span>
+                  <span className="text-sm">{catInfo.label}</span>
+                  <span className="ml-auto text-[var(--text-secondary)] text-sm">{catEntries.length}</span>
                 </button>
 
                 {/* Entries */}
@@ -489,7 +771,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                     {catEntries.map(entry => (
                       <div
                         key={entry.id}
-                        className={`px-3 py-1.5 cursor-pointer flex items-center justify-between group rounded-md my-0.5 transition-all ${
+                        className={`px-3 py-2 cursor-pointer flex items-center justify-between group rounded-md my-0.5 transition-all ${
                           selectedEntry?.id === entry.id
                             ? 'bg-[var(--accent-glow)] border-l-2 border-l-[var(--accent)]'
                             : 'hover:bg-[var(--bg-surface)]'
@@ -497,16 +779,16 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                         onClick={() => handleSelectEntry(entry)}
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className={`text-sm truncate ${selectedEntry?.id === entry.id ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>
+                          <span className={`text-sm truncate ${selectedEntry?.id === entry.id ? 'text-[var(--accent)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
                             {entry.title}
                           </span>
                           {entry.aiFeedback && (
-                            <span className="text-[10px] text-emerald-400/60 flex-shrink-0" title="Avis IA disponible">✦</span>
+                            <span className="text-xs text-emerald-400/80 flex-shrink-0" title="Avis IA disponible">✦</span>
                           )}
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteEntry(entry.id); }}
-                          className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs transition-opacity flex-shrink-0"
+                          className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-sm transition-opacity flex-shrink-0"
                         >
                           ✕
                         </button>
@@ -516,7 +798,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                     {/* Quick add in this category */}
                     <button
                       onClick={() => { setAddingToCategory(catId); setNewEntryTitle(''); }}
-                      className="w-full px-3 py-1 text-left text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+                      className="w-full px-3 py-1.5 text-left text-sm text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
                     >
                       + ajouter…
                     </button>
@@ -531,7 +813,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
             <div className="mt-2 mx-1 p-3 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-base">{getCategoryInfo(addingToCategory).icon}</span>
-                <span className="text-sm text-[var(--text-secondary)] font-medium">{getCategoryInfo(addingToCategory).label}</span>
+                <span className="text-sm text-[var(--text-primary)] font-bold">{getCategoryInfo(addingToCategory).label}</span>
               </div>
               <input
                 type="text"
@@ -549,13 +831,13 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                 <button
                   onClick={handleCreateEntry}
                   disabled={!newEntryTitle.trim()}
-                  className="flex-1 px-3 py-1.5 bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 text-[var(--accent)] text-xs rounded-lg transition-all disabled:opacity-30"
+                  className="flex-1 px-3 py-2 bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 text-[var(--accent)] text-sm rounded-lg transition-all disabled:opacity-30"
                 >
                   Créer
                 </button>
                 <button
                   onClick={() => { setAddingToCategory(null); setNewEntryTitle(''); }}
-                  className="px-3 py-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-xs rounded-lg transition-all"
+                  className="px-3 py-2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-sm rounded-lg transition-all"
                 >
                   Annuler
                 </button>
@@ -563,7 +845,17 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
             </div>
           )}
         </div>
+        </div>
       </div>
+
+      {/* Toggle WB Panel */}
+      <button
+        onClick={() => setShowWBPanel(!showWBPanel)}
+        className="flex-shrink-0 w-5 h-full bg-[var(--bg-secondary)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center justify-center border-r border-[var(--border-subtle)] transition-all text-xs"
+        title={showWBPanel ? 'Masquer la liste' : 'Afficher la liste'}
+      >
+        {showWBPanel ? '‹' : '›'}
+      </button>
 
       {/* Right: Entry editor + AI feedback */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -578,51 +870,149 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                 onChange={(e) => handleTitleChange(e.target.value)}
                 className="input-writer flex-1 px-3 py-1.5 text-[var(--text-primary)] text-sm font-medium rounded-lg bg-transparent border-transparent hover:border-[var(--border-subtle)] focus:border-[var(--accent)]/40"
               />
-              <span className="text-[var(--text-muted)] text-xs">
+              <span className="text-[var(--text-secondary)] text-xs font-medium">
                 {getCategoryInfo(selectedEntry.category).label}
               </span>
             </div>
 
-            {/* Content area split: editor top, feedback bottom */}
-            <div className="flex-1 flex flex-col overflow-hidden" ref={splitContainerRef}>
+            {/* Content area split: editor left/top, feedback right/bottom */}
+            <div className={`flex-1 flex ${wbLayoutMode === 'vertical' ? 'flex-col' : ''} overflow-hidden`} ref={splitContainerRef}>
               {/* Content editor */}
-              <div className="min-h-0 overflow-y-auto" style={{ height: `${editorHeight}%` }}>
-                <div className="px-6 py-5 h-full flex flex-col">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase">Description</label>
+              {!feedbackFullscreen && (
+              <div className="flex flex-col min-h-0" data-wb-editor-panel style={{
+                ...(editorFullscreen || !showFeedbackPanel
+                  ? { width: '100%', height: '100%' }
+                  : wbLayoutMode === 'horizontal'
+                    ? { width: `${editorHeight}%` }
+                    : { height: `${editorHeight}%`, width: '100%' }
+                )
+              }}>
+                {/* Sticky toolbar */}
+                <div className="flex-shrink-0 px-6 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[var(--accent)] text-sm font-bold tracking-widest uppercase">Description</label>
+                    <div className="w-px h-5 bg-[var(--border-subtle)]" />
+                    {wbEditorRef.current && (
+                      <EditorToolbar
+                        editor={wbEditorRef.current}
+                        wordCount={`${htmlToPlainText(editContent).length} car.`}
+                        onGenerateSummary={selectedEntry ? handleGenerateWBSummary : undefined}
+                        isGeneratingSummary={isGeneratingSummary}
+                        hasSummary={!!textSummary}
+                        onShowSummary={() => setShowSummaryPopup(p => !p)}
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setShowFeedbackPanel(p => !p)}
+                      className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm px-1.5"
+                      title={showFeedbackPanel ? 'Masquer les avis' : 'Afficher les avis'}
+                    >
+                      {showFeedbackPanel ? '⟫' : '⟪'}
+                    </button>
+                    <button
+                      onClick={() => setWbLayoutMode(m => m === 'horizontal' ? 'vertical' : 'horizontal')}
+                      className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm px-1.5"
+                      title={wbLayoutMode === 'horizontal' ? 'Passer en mode haut/bas' : 'Passer en mode gauche/droite'}
+                    >
+                      {wbLayoutMode === 'horizontal' ? '⬒' : '⬓'}
+                    </button>
+                    <button
+                      onClick={() => setEditorFullscreen(f => !f)}
+                      className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm px-1.5"
+                      title={editorFullscreen ? 'Réduire' : 'Plein écran éditeur'}
+                    >
+                      {editorFullscreen ? '⊟' : '⊞'}
+                    </button>
+                    <div className="w-px h-5 bg-[var(--border-subtle)]" />
                     <button
                       onClick={handleAutofill}
                       disabled={loadingAutofill || loadingFeedback}
-                      className="px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-xs font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                      className="px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-sm font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
                     >
                       {loadingAutofill ? (
                         <><span className="loading-cursor">▊</span> Génération…</>
                       ) : (
-                        <><span>🤖</span> {editContent.trim() ? 'Développer par IA' : 'Remplir par IA'}</>
-                      )}
+                        <><span>🤖</span> {htmlToPlainText(editContent).trim() ? 'Développer par IA' : 'Remplir par IA'}</>                      )}
                     </button>
                   </div>
-                  <textarea
-                    className="input-writer w-full flex-1 min-h-[100px] p-4 text-[var(--text-secondary)] placeholder-[var(--text-muted)] rounded-xl resize-none leading-relaxed text-sm"
-                    placeholder="Décrivez cet élément de votre univers en détail…"
-                    value={editContent}
-                    onChange={(e) => handleContentChange(e.target.value)}
-                  />
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-[var(--text-muted)] text-xs tabular-nums">{editContent.length} car.</span>
-                  </div>
                 </div>
+                {/* Scrollable editor */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+                  <RichEditor
+                    content={editContent}
+                    onUpdate={(html) => handleContentChange(html)}
+                    placeholder="Décrivez cet élément de votre univers en détail…"
+                    wrapperClassName="editor-area w-full flex-1 min-h-[100px] rounded-xl overflow-y-auto"
+                    className="p-4 placeholder-[#999] leading-relaxed focus:outline-none min-h-full"
+                    style={{ fontSize: '18px' }}
+                    editorRef={wbEditorRef}
+                  />
+                </div>
+                {/* Summary popup - resizable */}
+                {showSummaryPopup && textSummary && (
+                  <div className="flex-shrink-0 border-t border-[var(--accent)]/30 bg-[var(--bg-surface)] flex flex-col" style={{ height: summaryHeight }}>
+                    <div className="px-6 py-2 flex items-center justify-between flex-shrink-0">
+                      <span className="text-[var(--accent)] text-sm font-bold tracking-widest uppercase">📋 Résumé auto-généré</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setSummaryHeight(h => Math.min(600, h + 80))}
+                          className="text-[var(--text-muted)] hover:text-[var(--accent)] text-sm transition-colors px-1"
+                          title="Agrandir"
+                        >▲</button>
+                        <button
+                          onClick={() => setSummaryHeight(h => Math.max(100, h - 80))}
+                          className="text-[var(--text-muted)] hover:text-[var(--accent)] text-sm transition-colors px-1"
+                          title="Réduire"
+                        >▼</button>
+                        <button
+                          onClick={handleGenerateWBSummary}
+                          disabled={isGeneratingSummary}
+                          className="text-[var(--text-muted)] hover:text-[var(--accent)] text-xs transition-colors"
+                          title="Régénérer le résumé"
+                        >
+                          {isGeneratingSummary ? '⏳' : '🔄'}
+                        </button>
+                        <button
+                          onClick={() => setShowSummaryPopup(false)}
+                          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg leading-none transition-colors"
+                          title="Fermer"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-6 pb-3 flex-1 min-h-0">
+                      <textarea
+                        className="w-full h-full p-3 text-sm text-[var(--text-secondary)] bg-[var(--bg-primary)] rounded-lg border border-[var(--border-subtle)] resize-none leading-relaxed"
+                        value={textSummary}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTextSummary(val);
+                          if (selectedEntry) {
+                            updateWorldBuildingEntry(selectedEntry.id, { textSummary: val });
+                            setEntries(prev => prev.map(en => en.id === selectedEntry.id ? { ...en, textSummary: val } : en));
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
+              )}
 
               {/* Draggable Divider */}
-              {isDragging && (
-                <div className="fixed inset-0 z-50" style={{ cursor: 'row-resize' }} />
+              {!feedbackFullscreen && !editorFullscreen && isDragging && (
+                <div className="fixed inset-0 z-50" style={{ cursor: wbLayoutMode === 'horizontal' ? 'col-resize' : 'row-resize' }} />
               )}
+              {showFeedbackPanel && !feedbackFullscreen && !editorFullscreen && (
               <div
                 style={{
-                  height: '6px',
-                  width: '100%',
-                  cursor: 'row-resize',
+                  ...(wbLayoutMode === 'horizontal'
+                    ? { width: '6px', height: '100%', cursor: 'col-resize' }
+                    : { height: '6px', width: '100%', cursor: 'row-resize' }
+                  ),
                   flexShrink: 0,
                   backgroundColor: isDragging ? '#c9a55a' : '#333',
                   position: 'relative',
@@ -633,20 +1023,38 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                 onMouseEnter={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = '#c9a55a'; }}
                 onMouseLeave={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = '#333'; }}
               />
+              )}
 
               {/* AI Feedback section */}
-              <div className="min-h-0 overflow-hidden flex flex-col" style={{ height: `${100 - editorHeight}%` }}>
+              {showFeedbackPanel && !editorFullscreen && (
+              <div className="min-h-0 overflow-hidden flex flex-col" style={{
+                ...(feedbackFullscreen
+                  ? { width: '100%', height: '100%' }
+                  : wbLayoutMode === 'horizontal'
+                    ? { width: `${100 - editorHeight}%` }
+                    : { height: `${100 - editorHeight}%`, width: '100%' }
+                )
+              }}>
                 <div className="px-6 py-3 flex-shrink-0 border-b border-[var(--border-subtle)]">
                   <div className="flex items-center justify-between">
-                    <label className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase flex items-center gap-2">
-                      <span className="text-base">✦</span> Avis IA
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setFeedbackFullscreen(f => !f)}
+                        className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm"
+                        title={feedbackFullscreen ? 'Réduire' : 'Plein écran'}
+                      >
+                        {feedbackFullscreen ? '⊟' : '⊞'}
+                      </button>
+                      <label className="text-[var(--accent)] text-sm font-bold tracking-widest uppercase flex items-center gap-2">
+                      <span className="text-lg">✦</span> Avis IA
                       {feedbackHistory.length > 0 && (
-                        <span className="text-[var(--text-muted)]/60 text-[10px] font-normal normal-case tracking-normal">({feedbackHistory.length})</span>
+                        <span className="text-[var(--text-secondary)] text-sm font-normal normal-case tracking-normal">({feedbackHistory.length})</span>
                       )}
-                    </label>
+                      </label>
+                    </div>
                     <div className="flex items-center gap-2">
                       <select
-                        className="input-writer px-2 py-1.5 rounded-lg text-[var(--text-secondary)] text-xs"
+                        className="input-writer px-2 py-2 rounded-lg text-[var(--text-secondary)] text-sm"
                         value={selectedReviewer}
                         onChange={(e) => setSelectedReviewer(e.target.value)}
                       >
@@ -657,37 +1065,60 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                       </select>
                       <button
                         onClick={() => { setViewingFeedbackId(null); setAiFeedback(''); handleGetFeedback(); }}
-                        disabled={loadingFeedback || loadingAutofill || !editContent.trim()}
-                        className="px-4 py-2 bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-xs font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        disabled={loadingFeedback || loadingAutofill || !htmlToPlainText(editContent).trim()}
+                        className="px-4 py-2.5 bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-sm font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         {loadingFeedback ? 'Analyse en cours…' : 'Demander un avis'}
+                      </button>
+                      <button
+                        onClick={() => { setViewingFeedbackId(null); setAiFeedback(''); handleWBReadersPanel(); }}
+                        disabled={loadingFeedback || loadingAutofill || !htmlToPlainText(editContent).trim()}
+                        className="px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-sm font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="5 lecteurs aléatoires donnent leur avis"
+                      >
+                        👥 Lecteurs
+                      </button>
+                      <button
+                        onClick={() => { if (favoritePanel.length > 0) { setViewingFeedbackId(null); setAiFeedback(''); handleWBCustomPanel(); } else { setShowPanelConfig(true); } }}
+                        disabled={loadingFeedback || loadingAutofill || !htmlToPlainText(editContent).trim()}
+                        className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm font-medium rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed border border-amber-500/30"
+                        title={favoritePanel.length > 0 ? `Mon panel : ${favoritePanel.length} auteurs` : 'Configurer mon panel'}
+                      >
+                        ⭐ Panel ({favoritePanel.length})
+                      </button>
+                      <button
+                        className="py-2.5 px-3 rounded-lg text-sm font-medium transition-all border border-amber-500/30 text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/15"
+                        onClick={() => setShowPanelConfig(true)}
+                        title="Modifier la composition du panel"
+                      >
+                        ✏️ Modifier panel
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex-1 flex overflow-hidden">
-                  {/* Feedback history sidebar */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {/* Feedback history strip */}
                   {feedbackHistory.length > 0 && (
-                    <div className="w-48 flex-shrink-0 border-r border-[var(--border-subtle)] overflow-y-auto bg-[var(--bg-secondary)]">
+                    <div className="flex-shrink-0 flex overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] gap-0">
                       {feedbackHistory.map((fb) => {
                         const isActive = viewingFeedbackId === fb.id;
                         const date = new Date(fb.createdAt);
                         return (
                           <div
                             key={fb.id}
-                            className={`px-3 py-2.5 cursor-pointer border-b border-[var(--border-subtle)] transition-all group ${
+                            className={`px-3 py-2 cursor-pointer border-r border-[var(--border-subtle)] transition-all group flex-shrink-0 ${
                               isActive
-                                ? 'bg-[var(--accent-glow)] border-l-2 border-l-[var(--accent)]'
-                                : 'hover:bg-[var(--bg-surface)] border-l-2 border-l-transparent'
+                                ? 'bg-[var(--accent-glow)] border-b-2 border-b-[var(--accent)]'
+                                : 'hover:bg-[var(--bg-surface)] border-b-2 border-b-transparent'
                             }`}
                             onClick={() => {
                               setViewingFeedbackId(fb.id);
                               setAiFeedback(fb.feedback);
                             }}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className={`text-xs font-medium truncate ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-sm font-semibold truncate max-w-[140px] ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
                                 {fb.reviewer}
                               </span>
                               <button
@@ -701,12 +1132,12 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                                     setAiFeedback('');
                                   }
                                 }}
-                                className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-[10px] transition-opacity flex-shrink-0 ml-1"
+                                className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-sm transition-opacity flex-shrink-0"
                               >
                                 ✕
                               </button>
                             </div>
-                            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                            <div className="text-xs text-[var(--text-secondary)] mt-0.5 whitespace-nowrap">
                               {date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
                               {' · '}
                               {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
@@ -718,23 +1149,26 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                   )}
 
                   {/* Feedback content */}
-                  <div className="flex-1 overflow-y-auto px-6 py-4">
+                  <div className="critique-area flex-1 overflow-y-auto">
+                   <div className="critique-area-bg px-6 py-4">
                     {(aiFeedback || loadingFeedback) ? (
-                      <div className="p-5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
+                      <div className="p-5 border border-white/10 rounded-xl">
                         <div className="critique-content">
-                          {aiFeedback.split('\n').map((line, i) => renderFeedbackLine(line, i))}
+                          {renderMarkdownContent(aiFeedback, renderFeedbackLine)}
                           {loadingFeedback && <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>}
                         </div>
                       </div>
                     ) : (
-                      <div className="p-5 bg-[var(--bg-surface)]/50 border border-dashed border-[var(--border-subtle)] rounded-xl text-center">
+                      <div className="p-5 border border-dashed border-white/10 rounded-xl text-center">
                         <p className="text-[var(--text-muted)] text-sm">Cliquez sur « Demander un avis » pour obtenir un retour IA sur cet élément</p>
                         <p className="text-[var(--text-muted)]/60 text-xs mt-1">L&apos;IA analysera la cohérence, l&apos;originalité et proposera des améliorations</p>
                       </div>
                     )}
+                   </div>
                   </div>
                 </div>
               </div>
+              )}
             </div>
           </>
         ) : (
@@ -755,6 +1189,53 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
       {/* Close add menu on outside click */}
       {showAddMenu && (
         <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
+      )}
+
+      {/* Panel config modal */}
+      {showPanelConfig && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowPanelConfig(false)}>
+          <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl w-[36rem] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <h3 className="text-[var(--text-primary)] font-semibold text-base">⭐ Configurer mon panel d&apos;auteurs</h3>
+              <button onClick={() => setShowPanelConfig(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
+            </div>
+            <div className="px-6 py-2 text-[var(--text-secondary)] text-sm">
+              Choisissez vos auteurs favoris. Ils donneront un avis collégial sous forme de dialogue.
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-3 space-y-1">
+              {reviewers.map(r => {
+                const isSelected = favoritePanel.includes(r.id);
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => togglePanelMember(r.id)}
+                    className={`w-full px-4 py-3 text-left text-sm rounded-xl transition-all flex items-center gap-3 ${
+                      isSelected
+                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] border border-transparent'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 text-xs ${
+                      isSelected ? 'bg-amber-500 border-amber-500 text-black' : 'border-[var(--border-medium)]'
+                    }`}>
+                      {isSelected ? '✓' : ''}
+                    </span>
+                    <span>{r.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-between">
+              <span className="text-[var(--text-muted)] text-sm">{favoritePanel.length} auteur{favoritePanel.length !== 1 ? 's' : ''} sélectionné{favoritePanel.length !== 1 ? 's' : ''}</span>
+              <button
+                onClick={() => setShowPanelConfig(false)}
+                className="btn-accent px-6 py-2 rounded-lg text-sm"
+              >
+                Valider
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

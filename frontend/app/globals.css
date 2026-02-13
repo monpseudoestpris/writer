@@ -25,6 +25,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 18px;
   background: var(--bg-primary);
 }
 
@@ -53,28 +54,155 @@ html, body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ContentEditable editor */
-[contenteditable][data-placeholder]:empty::before {
+/* TipTap Editor */
+.tiptap {
+  font-family: 'Lora', Georgia, 'Times New Roman', serif;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+  outline: none;
+  min-height: 100%;
+}
+
+.tiptap:focus {
+  outline: none;
+}
+
+.tiptap p {
+  margin-bottom: 0.5em;
+}
+
+.tiptap p:last-child {
+  margin-bottom: 0;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
+  float: left;
   color: var(--text-muted);
   pointer-events: none;
+  height: 0;
   font-style: italic;
 }
 
+.tiptap strong, .tiptap b {
+  font-weight: 700;
+}
+
+.tiptap h1 {
+  font-size: 1.8em;
+  font-weight: 700;
+  margin: 0.8em 0 0.4em;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.tiptap h2 {
+  font-size: 1.4em;
+  font-weight: 600;
+  margin: 0.7em 0 0.3em;
+  line-height: 1.35;
+}
+
+.tiptap h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 0.6em 0 0.25em;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+/* Dark colors for headings inside paper editor */
+.editor-area .tiptap h1 { color: #111; }
+.editor-area .tiptap h2 { color: #5a3e1b; }
+.editor-area .tiptap h3 { color: #3a3a3a; }
+.editor-area .tiptap blockquote { color: #444; border-left-color: #8b6914; }
+.editor-area .tiptap strong, .editor-area .tiptap b { color: #111; }
+.editor-area .tiptap hr { border-top-color: rgba(0, 0, 0, 0.15); }
+.editor-area .tiptap p.is-editor-empty:first-child::before { color: #999; }
+
+.tiptap h1:first-child,
+.tiptap h2:first-child,
+.tiptap h3:first-child {
+  margin-top: 0;
+}
+
+.tiptap blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  margin: 0.8em 0;
+  font-style: italic;
+}
+
+.tiptap ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.tiptap ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.tiptap li {
+  margin: 0.25em 0;
+}
+
+.tiptap li p {
+  margin: 0;
+}
+
+.tiptap hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 1em 0;
+}
+
+/* Legacy ContentEditable (kept for compatibility) */
 [contenteditable]:focus {
   outline: none;
 }
 
-[contenteditable] b,
-[contenteditable] strong {
-  font-weight: 700;
-}
-
-/* Editor font */
+/* Editor area container styles (applies to TipTap wrapper) */
 .editor-area {
   font-family: 'Lora', Georgia, 'Times New Roman', serif;
   line-height: 1.85;
   letter-spacing: 0.01em;
+  background: url('/paper.png') repeat;
+  background-size: auto;
+  color: #1a1a1a;
+}
+
+/* Ensure EditorContent and .tiptap fill the editor-area container */
+.editor-area > div,
+.editor-area > div > .tiptap {
+  min-height: 100%;
+  height: 100%;
+}
+
+/* Critique / feedback panel background */
+.critique-area {
+  color: #e8e0d0;
+}
+
+.critique-area-bg {
+  background: url('/board.png') repeat;
+  background-size: auto;
+  min-height: 100%;
+}
+
+.critique-area .critique-content {
+  color: #e8e0d0;
+}
+
+.critique-area h1, .critique-area h2, .critique-area h3,
+.critique-area strong, .critique-area b {
+  color: #f5efe6;
+}
+
+.critique-area a {
+  color: #c9a55a;
 }
 
 /* Glass effect */

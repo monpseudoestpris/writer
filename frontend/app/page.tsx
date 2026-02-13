@@ -8,11 +8,95 @@ import {
   getWriterProfile, saveWriterProfile,
   updateBook, updateChapter,
   saveCritique, getCritiquesByChapter, updateCritiqueSummary, deleteCritique,
-  exportDatabase, downloadExport, importDatabase, WriterExport
+  exportDatabase, downloadExport, importDatabase, WriterExport,
+  getFavoritePanel, saveFavoritePanel
 } from './lib/db';
 import WorldBuilding from './components/WorldBuilding';
+import RichEditor, { EditorToolbar } from './components/RichEditor';
+import type { Editor } from '@tiptap/react';
 
 type Reviewer = { id: string; name: string };
+
+// Normalize HTML from contentEditable: flatten to clean inline HTML with uniform <br><br> paragraph breaks
+const sanitizeEditorHtml = (html: string): string => {
+  if (!html || !html.trim()) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+
+  const BLOCK = new Set(['p','div','h1','h2','h3','h4','h5','h6','blockquote','li','ul','ol','pre','section','article','table','tr','td','th','header','footer','figure','address']);
+  const INLINE = new Set(['b','strong','i','em','u','span','a','sub','sup','mark','small','del','s','ins','code']);
+
+  let out = '';
+  let atBreak = true; // true = we're at a line break point (no need to add another)
+
+  const addBreak = () => {
+    if (!atBreak && out.length > 0) {
+      out += '<br><br>';
+      atBreak = true;
+    }
+  };
+
+  const walk = (node: Node) => {
+    if (node.nodeType === 3) {
+      // Text node: collapse whitespace, skip pure-whitespace nodes
+      const t = (node.textContent || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+      if (t.trim()) {
+        // Add a space before if needed (after inline content, before more text)
+        if (!atBreak && out.length > 0 && t.startsWith(' ')) out += ' ';
+        out += t.trim();
+        if (t.endsWith(' ')) out += ' ';
+        atBreak = false;
+      }
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+
+    // Skip invisible elements
+    if (['style','script','meta','link','head'].includes(tag)) return;
+
+    if (tag === 'br') {
+      out += '<br>';
+      atBreak = true;
+      return;
+    }
+
+    const isBlock = BLOCK.has(tag);
+    if (isBlock) addBreak();
+
+    if (INLINE.has(tag) || tag === 'font') {
+      // Preserve inline tags with safe attributes, recurse into children
+      const keepAttrs = ['style','class','href'];
+      const attrs = Array.from(el.attributes)
+        .filter(a => keepAttrs.includes(a.name))
+        .map(a => `${a.name}="${a.value}"`)
+        .join(' ');
+      const open = attrs ? `<${tag} ${attrs}>` : `<${tag}>`;
+      out += open;
+      for (const c of Array.from(el.childNodes)) walk(c);
+      out += `</${tag}>`;
+    } else {
+      // Block or unknown element: just recurse into children
+      for (const c of Array.from(el.childNodes)) walk(c);
+    }
+
+    if (isBlock) addBreak();
+  };
+
+  for (const child of Array.from(tmp.childNodes)) walk(child);
+
+  // Collapse 3+ <br> into exactly <br><br>
+  out = out.replace(/(<br\s*\/?>[\s]*){3,}/gi, '<br><br>');
+  // Remove &nbsp;
+  out = out.replace(/&nbsp;/g, ' ');
+  // Trim leading/trailing <br> and whitespace
+  out = out.replace(/^(\s*<br\s*\/?>[\s]*)+/i, '');
+  out = out.replace(/([\s]*<br\s*\/?>[\s]*)+$/i, '');
+  // Remove empty inline tags
+  out = out.replace(/<(b|strong|i|em|u|span|font)[^>]*>\s*<\/\1>/gi, '');
+  return out.trim();
+};
 
 // Extract plain text from HTML (for sending to API)
 const htmlToPlainText = (html: string): string => {
@@ -37,6 +121,77 @@ function renderInline(text: string): ReactNode {
     }
     return <span key={i}>{part}</span>;
   });
+}
+
+// Render a markdown table from grouped lines
+function renderMarkdownTable(lines: string[], keyBase: number): ReactNode {
+  const parseRow = (line: string) =>
+    line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+
+  const rows = lines.filter(l => !/^\|?\s*[-:]+[-|:\s]*\|?\s*$/.test(l));
+  if (rows.length === 0) return null;
+
+  const header = parseRow(rows[0]);
+  const body = rows.slice(1).map(parseRow);
+
+  return (
+    <div key={`table-${keyBase}`} className="my-4 overflow-x-auto rounded-lg border border-[var(--border-subtle)]">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="bg-[var(--bg-surface)]">
+            {header.map((cell, j) => (
+              <th key={j} className="px-4 py-2.5 text-left text-xs font-bold text-[var(--accent)] uppercase tracking-wider border-b border-[var(--border-subtle)]">
+                {renderInline(cell)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? 'bg-[var(--bg-primary)]' : 'bg-[var(--bg-surface)]/50'}>
+              {row.map((cell, ci) => (
+                <td key={ci} className="px-4 py-2 text-[var(--text-secondary)] border-b border-[var(--border-subtle)]/50 leading-relaxed">
+                  {renderInline(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Render full markdown content with table support
+function renderMarkdownContent(text: string, lineRenderer: (line: string, i: number) => ReactNode): ReactNode[] {
+  const lines = text.split('\n');
+  const elements: ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    // Detect table: line contains | and is not just a horizontal rule
+    if (/\|/.test(line) && !/^[-*_]{3,}$/.test(line.trim())) {
+      // Collect consecutive table lines
+      const tableLines: string[] = [];
+      while (i < lines.length && /\|/.test(lines[i]) && !/^[-*_]{3,}$/.test(lines[i].trim())) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      // Only render as table if we have header + separator + at least one row (3+ lines)
+      if (tableLines.length >= 3 && tableLines.some(l => /^\|?\s*[-:]+[-|:\s]*\|?\s*$/.test(l))) {
+        elements.push(renderMarkdownTable(tableLines, i));
+      } else {
+        // Not a real table, render lines normally
+        tableLines.forEach((tl, ti) => elements.push(lineRenderer(tl, i - tableLines.length + ti)));
+      }
+    } else {
+      elements.push(lineRenderer(line, i));
+      i++;
+    }
+  }
+
+  return elements;
 }
 
 // Parse a single line of critique markdown into a React element
@@ -165,14 +320,14 @@ export default function Home() {
   const [critique, setCritique] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fontSize, setFontSize] = useState(18);
   const [saving, setSaving] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<Editor | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // UI
   const [showSidebar, setShowSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
+  const [critiqueFullscreen, setCritiqueFullscreen] = useState(false);
   const [editorWidth, setEditorWidth] = useState(50); // percentage for both axes
   const [isDragging, setIsDragging] = useState(false);
   const [layoutMode, setLayoutMode] = useState<'horizontal' | 'vertical'>('horizontal');
@@ -210,6 +365,9 @@ export default function Home() {
   const [chapterSummary, setChapterSummary] = useState('');
   const bookSummaryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const chapterSummaryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [showSummaryPopup, setShowSummaryPopup] = useState(false);
+  const [summaryHeight, setSummaryHeight] = useState(250);
 
   // Critique history
   const [pastCritiques, setPastCritiques] = useState<CritiqueEntry[]>([]);
@@ -218,11 +376,29 @@ export default function Home() {
   const [viewingSummary, setViewingSummary] = useState(false);
   const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
 
+  // Custom panel
+  const [favoritePanel, setFavoritePanel] = useState<string[]>([]);
+  const [showPanelConfig, setShowPanelConfig] = useState(false);
+
+  // Focus mode: F11 toggles all panels off for distraction-free writing
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        setShowSidebar(prev => !prev);
+        setShowRightPanel(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Load books on mount
   useEffect(() => {
     loadBooks();
     loadReviewers();
     getWriterProfile().then(p => { if (p) setWriterProfile(p); });
+    getFavoritePanel().then(p => { if (p.length) setFavoritePanel(p); });
   }, []);
 
   const loadReviewers = async () => {
@@ -258,10 +434,7 @@ export default function Home() {
     flushSave.current();
 
     if (selectedChapter && selectedChapterId) {
-      setText(selectedChapter.content);
-      if (editorRef.current) {
-        editorRef.current.innerHTML = selectedChapter.content || '';
-      }
+      setText(selectedChapter.content || '');
       setChapterSummary(selectedChapter.summary || '');
       setCritique('');
       setViewingCritiqueId(null);
@@ -276,9 +449,6 @@ export default function Home() {
       });
     } else if (!selectedChapterId) {
       setText('');
-      if (editorRef.current) {
-        editorRef.current.innerHTML = '';
-      }
       setChapterSummary('');
       setPastCritiques([]);
       setTextAtLastCritique(null);
@@ -296,7 +466,7 @@ export default function Home() {
         saveTimeoutRef.current = null;
       }
       if (selectedChapter && editorRef.current) {
-        const currentContent = editorRef.current.innerHTML;
+        const currentContent = editorRef.current.getHTML();
         if (currentContent !== selectedChapter.content) {
           saveChapterContent(selectedChapter.id, currentContent);
         }
@@ -381,14 +551,44 @@ export default function Home() {
     if (selectedBook) loadChapters(selectedBook.id);
   };
 
+  // Generate text summary via AI
+  const handleGenerateChapterSummary = async () => {
+    const plainText = htmlToPlainText(text);
+    if (!plainText.trim() || !selectedChapter) return;
+    setIsGeneratingSummary(true);
+    try {
+      const response = await fetch('http://localhost:8000/summarize-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: plainText }),
+      });
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+      const data = await response.json();
+      if (data.summary) {
+        setChapterSummary(data.summary);
+        await updateChapter(selectedChapter.id, { summary: data.summary });
+        setShowSummaryPopup(true);
+      }
+    } catch (e: unknown) {
+      console.error('Erreur génération résumé:', e);
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
   const handleReview = async () => {
     const plainText = htmlToPlainText(text);
     if (!plainText.trim()) return;
 
     setLoading(true);
     setError(null);
-    setCritique('');
     setViewingCritiqueId(null);
+
+    // Prepend text summary to critique if available
+    const summaryHeader = chapterSummary
+      ? `**📋 Résumé du texte :**\n${chapterSummary}\n\n---\n\n`
+      : '';
+    setCritique(summaryHeader);
 
     // Always send previous critiques (summarized by backend via mistral-small)
     const textChanged = textAtLastCritique !== null && text !== textAtLastCritique;
@@ -418,7 +618,7 @@ export default function Home() {
 
       if (!reader) throw new Error("Pas de stream disponible");
 
-      let fullCritique = '';
+      let fullCritique = summaryHeader;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -464,9 +664,14 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    setCritique('');
     setViewingCritiqueId(null);
     setRightTab('critique');
+
+    // Prepend text summary to critique if available
+    const summaryHeader = chapterSummary
+      ? `**📋 Résumé du texte :**\n${chapterSummary}\n\n---\n\n`
+      : '';
+    setCritique(summaryHeader);
 
     try {
       const response = await fetch('http://localhost:8000/review-dialogue', {
@@ -487,7 +692,7 @@ export default function Home() {
       const decoder = new TextDecoder();
       if (!reader) throw new Error("Pas de stream disponible");
 
-      let fullCritique = '';
+      let fullCritique = summaryHeader;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -526,32 +731,159 @@ export default function Home() {
     }
   };
 
-  const toggleBold = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    editor.focus();
-    document.execCommand('bold', false);
+  const handleReadersPanel = async () => {
+    const plainText = htmlToPlainText(text);
+    if (!plainText.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    setViewingCritiqueId(null);
+    setRightTab('critique');
+
+    const summaryHeader = chapterSummary
+      ? `**📋 Résumé du texte :**\n${chapterSummary}\n\n---\n\n`
+      : '';
+    setCritique(summaryHeader);
+
+    try {
+      const response = await fetch('http://localhost:8000/review-readers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: plainText,
+          writer_profile: writerProfile || null,
+          book_summary: bookSummary || null,
+          chapter_summary: chapterSummary || null,
+          num_readers: 5,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("Pas de stream disponible");
+
+      let fullCritique = summaryHeader;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullCritique += chunk;
+        setCritique(prev => prev + chunk);
+      }
+
+      if (selectedChapter && fullCritique) {
+        const entry = await saveCritique(selectedChapter.id, 'panel_lecteurs', fullCritique, text);
+        setPastCritiques(prev => [...prev, entry]);
+
+        fetch('http://localhost:8000/summarize-critique', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ critique: fullCritique }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.summary) {
+              updateCritiqueSummary(entry.id, data.summary);
+              setPastCritiques(prev =>
+                prev.map(c => c.id === entry.id ? { ...c, summary: data.summary } : c)
+              );
+            }
+          })
+          .catch(() => {});
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Une erreur est survenue.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const toggleItalic = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    editor.focus();
-    document.execCommand('italic', false);
+  const handleCustomPanel = async () => {
+    const plainText = htmlToPlainText(text);
+    if (!plainText.trim() || favoritePanel.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+    setViewingCritiqueId(null);
+    setRightTab('critique');
+
+    const summaryHeader = chapterSummary
+      ? `**📋 Résumé du texte :**\n${chapterSummary}\n\n---\n\n`
+      : '';
+    setCritique(summaryHeader);
+
+    try {
+      const response = await fetch('http://localhost:8000/review-panel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: plainText,
+          reviewer_ids: favoritePanel,
+          writer_profile: writerProfile || null,
+          book_summary: bookSummary || null,
+          chapter_summary: chapterSummary || null,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("Pas de stream disponible");
+
+      let fullCritique = summaryHeader;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullCritique += chunk;
+        setCritique(prev => prev + chunk);
+      }
+
+      if (selectedChapter && fullCritique) {
+        const entry = await saveCritique(selectedChapter.id, 'mon_panel', fullCritique, text);
+        setPastCritiques(prev => [...prev, entry]);
+
+        fetch('http://localhost:8000/summarize-critique', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ critique: fullCritique }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.summary) {
+              updateCritiqueSummary(entry.id, data.summary);
+              setPastCritiques(prev =>
+                prev.map(c => c.id === entry.id ? { ...c, summary: data.summary } : c)
+              );
+            }
+          })
+          .catch(() => {});
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Une erreur est survenue.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const toggleUnderline = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    editor.focus();
-    document.execCommand('underline', false);
+  const togglePanelMember = async (id: string) => {
+    const updated = favoritePanel.includes(id)
+      ? favoritePanel.filter(r => r !== id)
+      : [...favoritePanel, id];
+    setFavoritePanel(updated);
+    await saveFavoritePanel(updated);
   };
 
   return (
     <div className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
       {/* Sidebar */}
-      {showSidebar && (
-        <div className="w-60 flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col">
+      <div style={{ width: showSidebar ? '17rem' : '0px', transition: 'width 200ms ease' }} className="flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden">
+        <div className="w-[17rem] h-full flex flex-col">
           {/* Logo */}
           <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
             <h1 className="text-[var(--accent)] font-semibold text-sm tracking-widest uppercase">Writer</h1>
@@ -559,7 +891,7 @@ export default function Home() {
 
           {/* Books Header */}
           <div className="px-4 pt-4 pb-3">
-            <h2 className="text-[var(--text-muted)] font-medium text-[11px] tracking-widest uppercase mb-3">Ouvrages</h2>
+            <h2 className="text-[var(--accent)] font-semibold text-sm tracking-widest uppercase mb-3">Ouvrages</h2>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -606,20 +938,20 @@ export default function Home() {
                     <div className="flex gap-1 my-2">
                       <button
                         onClick={() => setSidebarView('chapters')}
-                        className={`flex-1 px-2 py-1.5 text-[10px] font-medium tracking-wide uppercase rounded-md transition-all ${
+                        className={`flex-1 px-2 py-2 text-xs font-semibold tracking-wide uppercase rounded-md transition-all ${
                           sidebarView === 'chapters'
-                            ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'
+                            ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-bold'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
                         }`}
                       >
                         Chapitres
                       </button>
                       <button
                         onClick={() => { setSidebarView('worldbuilding'); setSelectedChapter(null); }}
-                        className={`flex-1 px-2 py-1.5 text-[10px] font-medium tracking-wide uppercase rounded-md transition-all ${
+                        className={`flex-1 px-2 py-2 text-xs font-semibold tracking-wide uppercase rounded-md transition-all ${
                           sidebarView === 'worldbuilding'
-                            ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'
+                            ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-bold'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
                         }`}
                       >
                         🌍 Univers
@@ -636,7 +968,7 @@ export default function Home() {
                         }`}
                         onClick={() => setSelectedChapter(chapter)}
                       >
-                        <span className={`text-sm truncate ${selectedChapter?.id === chapter.id ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>
+                        <span className={`text-sm truncate ${selectedChapter?.id === chapter.id ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-secondary)]'}`}>
                           {chapter.title}
                         </span>
                         <button
@@ -722,12 +1054,13 @@ export default function Home() {
             </label>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Toggle Sidebar */}
       <button
         onClick={() => setShowSidebar(!showSidebar)}
-        className="flex-shrink-0 w-5 h-full bg-[var(--bg-secondary)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center justify-center border-r border-[var(--border-subtle)] transition-all text-[10px]"
+        className="flex-shrink-0 w-5 h-full bg-[var(--bg-secondary)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center justify-center border-r border-[var(--border-subtle)] transition-all text-xs"
+        title={showSidebar ? 'Masquer la barre latérale (F11)' : 'Afficher la barre latérale (F11)'}
       >
         {showSidebar ? '‹' : '›'}
       </button>
@@ -740,7 +1073,8 @@ export default function Home() {
       ) : (
       <div className={`flex-1 flex ${layoutMode === 'vertical' ? 'flex-col' : ''}`} ref={mainContentRef}>
         {/* Editor Panel */}
-        <div className="flex flex-col" style={{
+        {!critiqueFullscreen && (
+        <div className="flex flex-col" data-editor-panel style={{
           ...(layoutMode === 'horizontal'
             ? { width: showRightPanel ? `${editorWidth}%` : '100%' }
             : { height: showRightPanel ? `${editorWidth}%` : '100%', width: '100%' }
@@ -748,7 +1082,7 @@ export default function Home() {
         }}>
           {/* Toolbar */}
           <div className="flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
-            <span className="text-[var(--text-muted)] text-sm font-medium tracking-tight">
+            <span className="text-[var(--text-primary)] text-sm font-semibold tracking-tight">
               {selectedChapter ? selectedChapter.title : 'Éditeur'}
             </span>
             
@@ -771,70 +1105,85 @@ export default function Home() {
               </button>
 
               <div className="w-px h-6 bg-[var(--border-subtle)] mx-1" />
-              <button
-                onClick={toggleBold}
-                className="w-9 h-9 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-bold transition-colors border border-[var(--border-subtle)]"
-                title="Gras (Ctrl+B)"
-              >
-                B
-              </button>
-              <button
-                onClick={toggleItalic}
-                className="w-9 h-9 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base italic transition-colors border border-[var(--border-subtle)]"
-                title="Italique (Ctrl+I)"
-              >
-                I
-              </button>
-              <button
-                onClick={toggleUnderline}
-                className="w-9 h-9 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base underline transition-colors border border-[var(--border-subtle)]"
-                title="Souligné (Ctrl+U)"
-              >
-                U
-              </button>
-              
-              <div className="w-px h-6 bg-[var(--border-subtle)] mx-1.5" />
-              
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setFontSize(f => Math.max(12, f - 2))}
-                  className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-medium transition-colors border border-[var(--border-subtle)]"
-                >
-                  −
-                </button>
-                <span className="w-8 text-center text-[var(--text-primary)] text-sm font-medium tabular-nums">{fontSize}</span>
-                <button
-                  onClick={() => setFontSize(f => Math.min(32, f + 2))}
-                  className="w-8 h-8 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-medium transition-colors border border-[var(--border-subtle)]"
-                >
-                  +
-                </button>
-              </div>
-              
-              <span className="text-[var(--text-muted)] text-[11px] ml-2 tabular-nums">{(() => { const t = htmlToPlainText(text); const w = t.trim() ? t.trim().split(/\s+/).length : 0; return `${w} mot${w > 1 ? 's' : ''} · ${t.length} car.`; })()}</span>
+              {editorRef.current && (
+                <EditorToolbar
+                  editor={editorRef.current}
+                  wordCount={(() => { const t = htmlToPlainText(text); const w = t.trim() ? t.trim().split(/\s+/).length : 0; return `${w} mot${w > 1 ? 's' : ''} · ${t.length} car.`; })()}
+                  onGenerateSummary={selectedChapter ? handleGenerateChapterSummary : undefined}
+                  isGeneratingSummary={isGeneratingSummary}
+                  hasSummary={!!chapterSummary}
+                  onShowSummary={() => setShowSummaryPopup(p => !p)}
+                />
+              )}
             </div>
           </div>
 
           {/* Editor */}
           {selectedChapter ? (
-            <div
-              ref={editorRef}
-              contentEditable
-              suppressContentEditableWarning
-              className="editor-area flex-1 min-h-0 px-10 py-8 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none overflow-y-auto"
-              style={{ fontSize: `${fontSize}px` }}
-              onInput={() => {
-                if (editorRef.current) {
-                  setText(editorRef.current.innerHTML);
-                }
-              }}
-              data-placeholder="Commencez à écrire…"
+            <RichEditor
+              content={text}
+              onUpdate={(html) => setText(html)}
+              placeholder="Commencez à écrire…"
+              wrapperClassName="editor-area flex-1 min-h-0 overflow-y-auto"
+              className="px-10 py-8 focus:outline-none min-h-full"
+              style={{ fontSize: '18px' }}
+              editorRef={editorRef}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
                 <p className="text-[var(--text-muted)] text-lg font-light mb-1">Aucun chapitre sélectionné</p>
                 <p className="text-[var(--text-muted)]/60 text-sm">Créez un ouvrage et un chapitre pour commencer</p>
+              </div>
+            </div>
+          )}
+
+          {/* Summary popup - resizable */}
+          {showSummaryPopup && chapterSummary && (
+            <div className="flex-shrink-0 border-t border-[var(--accent)]/30 bg-[var(--bg-surface)] flex flex-col" style={{ height: summaryHeight }}>
+              <div className="px-6 py-2 flex items-center justify-between flex-shrink-0">
+                <span className="text-[var(--accent)] text-xs font-bold tracking-widest uppercase">📋 Résumé auto-généré</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setSummaryHeight(h => Math.min(600, h + 80))}
+                    className="text-[var(--text-muted)] hover:text-[var(--accent)] text-sm transition-colors px-1"
+                    title="Agrandir"
+                  >▲</button>
+                  <button
+                    onClick={() => setSummaryHeight(h => Math.max(100, h - 80))}
+                    className="text-[var(--text-muted)] hover:text-[var(--accent)] text-sm transition-colors px-1"
+                    title="Réduire"
+                  >▼</button>
+                  <button
+                    onClick={handleGenerateChapterSummary}
+                    disabled={isGeneratingSummary}
+                    className="text-[var(--text-muted)] hover:text-[var(--accent)] text-xs transition-colors"
+                    title="Régénérer le résumé"
+                  >
+                    {isGeneratingSummary ? '⏳' : '🔄'}
+                  </button>
+                  <button
+                    onClick={() => setShowSummaryPopup(false)}
+                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg leading-none transition-colors"
+                    title="Fermer"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div className="px-6 pb-3 flex-1 min-h-0">
+                <textarea
+                  className="w-full h-full p-3 text-sm text-[var(--text-secondary)] bg-[var(--bg-primary)] rounded-lg border border-[var(--border-subtle)] resize-none leading-relaxed"
+                  value={chapterSummary}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setChapterSummary(val);
+                    if (chapterSummaryTimeoutRef.current) clearTimeout(chapterSummaryTimeoutRef.current);
+                    chapterSummaryTimeoutRef.current = setTimeout(() => {
+                      if (selectedChapter) updateChapter(selectedChapter.id, { summary: val });
+                    }, 1000);
+                  }}
+                />
               </div>
             </div>
           )}
@@ -865,8 +1214,79 @@ export default function Home() {
             >
               {loading ? '…' : '🎲 Random'}
             </button>
+            <button
+              className="py-2.5 px-4 rounded-lg text-sm font-medium transition-all border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/15"
+              onClick={handleReadersPanel}
+              disabled={loading || !text}
+              title="5 lecteurs aléatoires donnent leur avis"
+            >
+              {loading ? '…' : '👥 Lecteurs'}
+            </button>
+            <button
+              className="py-2.5 px-4 rounded-lg text-sm font-medium transition-all border border-amber-500/50 text-amber-400 hover:bg-amber-500/15"
+              onClick={favoritePanel.length > 0 ? handleCustomPanel : () => setShowPanelConfig(true)}
+              disabled={loading || !text}
+              title={favoritePanel.length > 0 ? `Mon panel : ${favoritePanel.length} auteurs` : 'Configurer mon panel'}
+            >
+              {loading ? '…' : `⭐ Panel (${favoritePanel.length})`}
+            </button>
+            <button
+              className="py-2.5 px-3 rounded-lg text-sm font-medium transition-all border border-amber-500/30 text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/15"
+              onClick={() => setShowPanelConfig(true)}
+              title="Modifier la composition du panel"
+            >
+              ✏️ Modifier panel
+            </button>
           </div>
         </div>
+        )}
+
+        {/* Panel config modal */}
+        {showPanelConfig && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowPanelConfig(false)}>
+            <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl w-[36rem] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+                <h3 className="text-[var(--text-primary)] font-semibold text-base">⭐ Configurer mon panel d&apos;auteurs</h3>
+                <button onClick={() => setShowPanelConfig(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
+              </div>
+              <div className="px-6 py-2 text-[var(--text-secondary)] text-sm">
+                Choisissez vos auteurs favoris. Ils donneront un avis collégial sous forme de dialogue.
+              </div>
+              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-1">
+                {reviewers.map(r => {
+                  const isSelected = favoritePanel.includes(r.id);
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => togglePanelMember(r.id)}
+                      className={`w-full px-4 py-3 text-left text-sm rounded-xl transition-all flex items-center gap-3 ${
+                        isSelected
+                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] border border-transparent'
+                      }`}
+                    >
+                      <span className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 text-xs ${
+                        isSelected ? 'bg-amber-500 border-amber-500 text-black' : 'border-[var(--border-medium)]'
+                      }`}>
+                        {isSelected ? '✓' : ''}
+                      </span>
+                      <span>{r.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-between">
+                <span className="text-[var(--text-muted)] text-sm">{favoritePanel.length} auteur{favoritePanel.length !== 1 ? 's' : ''} sélectionné{favoritePanel.length !== 1 ? 's' : ''}</span>
+                <button
+                  onClick={() => setShowPanelConfig(false)}
+                  className="btn-accent px-6 py-2 rounded-lg text-sm"
+                >
+                  Valider
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Full-screen overlay during drag to capture all mouse events */}
         {isDragging && (
@@ -874,7 +1294,7 @@ export default function Home() {
         )}
 
         {/* Draggable Divider */}
-        {showRightPanel && (
+        {showRightPanel && !critiqueFullscreen && (
           <div
             style={{
               ...(layoutMode === 'horizontal'
@@ -896,13 +1316,22 @@ export default function Home() {
         {/* Critique Panel */}
         {showRightPanel && (
         <div className="flex flex-col bg-[var(--bg-primary)]" style={{
-          ...(layoutMode === 'horizontal'
-            ? { width: `${100 - editorWidth}%` }
-            : { height: `${100 - editorWidth}%`, width: '100%' }
+          ...(critiqueFullscreen
+            ? { width: '100%', height: '100%' }
+            : layoutMode === 'horizontal'
+              ? { width: `${100 - editorWidth}%` }
+              : { height: `${100 - editorWidth}%`, width: '100%' }
           )
         }}>
           {/* Tabs */}
           <div className="flex-shrink-0 flex border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+            <button
+              onClick={() => setCritiqueFullscreen(f => !f)}
+              className="px-3 py-3 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm"
+              title={critiqueFullscreen ? 'Réduire le panneau' : 'Plein écran'}
+            >
+              {critiqueFullscreen ? '⊟' : '⊞'}
+            </button>
             <button
               onClick={() => setRightTab('critique')}
               className={`tab-btn px-5 py-3 text-sm font-medium ${
@@ -913,7 +1342,7 @@ export default function Home() {
             >
               Critique
               {pastCritiques.length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--accent)]/10 text-[var(--accent)] rounded-full">{pastCritiques.length}</span>
+                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-[var(--accent)]/10 text-[var(--accent)] rounded-full">{pastCritiques.length}</span>
               )}
             </button>
             <button
@@ -962,11 +1391,12 @@ export default function Home() {
               )}
 
               {/* Main critique area */}
-              <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="critique-area flex-1 overflow-y-auto">
+               <div className="critique-area-bg px-6 py-6">
                 {/* Current critique or streaming */}
                 {(critique || loading) && !viewingCritiqueId && (
                   <div className="critique-content">
-                    {critique.split('\n').map((line, i) => renderCritiqueLine(line, i))}
+                    {renderMarkdownContent(critique, renderCritiqueLine)}
                     {loading && <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>}
                   </div>
                 )}
@@ -1013,12 +1443,12 @@ export default function Home() {
                         </button>
                       </div>
                       {viewingSummary && pc.summary ? (
-                        <div className="critique-content p-5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
-                          {pc.summary.split('\n').map((line, i) => renderCritiqueLine(line, i))}
+                        <div className="critique-content p-5 border border-white/10 rounded-xl">
+                          {renderMarkdownContent(pc.summary, renderCritiqueLine)}
                         </div>
                       ) : (
                         <div className="critique-content">
-                          {pc.critique.split('\n').map((line, i) => renderCritiqueLine(line, i))}
+                          {renderMarkdownContent(pc.critique, renderCritiqueLine)}
                         </div>
                       )}
                     </div>
@@ -1042,12 +1472,13 @@ export default function Home() {
                     <p className="text-[var(--text-muted)]/60 text-xs">Consultez l&apos;historique ou lancez une nouvelle analyse</p>
                   </div>
                 )}
+               </div>
               </div>
 
               {/* Past critiques dropdown */}
               {pastCritiques.length > 0 && !loading && (
                 <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-5 py-2.5 bg-[var(--bg-secondary)] flex items-center gap-2">
-                  <span className="text-[var(--text-muted)] text-[11px] tracking-widest uppercase flex-shrink-0">Historique</span>
+                  <span className="text-[var(--accent)] text-sm font-semibold tracking-widest uppercase flex-shrink-0">Historique</span>
                   <select
                     className="input-writer flex-1 px-2 py-1.5 text-sm rounded-lg text-[var(--text-secondary)] truncate"
                     value={viewingCritiqueId || ''}
@@ -1084,7 +1515,7 @@ export default function Home() {
                           });
                         }
                       }}
-                      className="text-[var(--text-muted)] hover:text-red-400 transition-colors text-xs flex-shrink-0 px-1"
+                      className="text-[var(--text-muted)] hover:text-red-400 transition-colors text-sm flex-shrink-0 px-1"
                       title="Supprimer cette critique"
                     >
                       ✕
@@ -1143,7 +1574,7 @@ export default function Home() {
 
               {/* Context status */}
               <div className="mt-auto p-4 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl">
-                <p className="text-[var(--text-muted)] text-[11px] font-medium tracking-widest uppercase mb-3">Contexte actif</p>
+                <p className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-3">Contexte actif</p>
                 <div className="space-y-2">
                   {[
                     { label: 'Profil écrivain', active: !!writerProfile },

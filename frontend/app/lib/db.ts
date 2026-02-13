@@ -37,6 +37,7 @@ export interface WorldBuildingEntry {
   title: string;
   content: string;
   aiFeedback: string;
+  textSummary: string;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -52,6 +53,8 @@ export interface WBFeedbackEntry {
 
 export const WB_CATEGORIES = [
   { id: 'monde', label: 'Monde', icon: '🌍' },
+  { id: 'pitch_visible', label: 'Pitch · Ce que sait le lecteur', icon: '👁️' },
+  { id: 'pitch_cache', label: 'Pitch · Ce que le lecteur ignore', icon: '🔒' },
   { id: 'personnages', label: 'Personnages', icon: '👤' },
   { id: 'lieux', label: 'Lieux', icon: '📍' },
   { id: 'nature', label: 'Nature', icon: '🌿' },
@@ -62,6 +65,7 @@ export const WB_CATEGORIES = [
   { id: 'histoire', label: 'Histoire', icon: '📜' },
   { id: 'cultures', label: 'Cultures', icon: '🎭' },
   { id: 'religions', label: 'Religions', icon: '🕯️' },
+  { id: 'legendes', label: 'Légendes', icon: '📖' },
   { id: 'objets', label: 'Objets', icon: '🗡️' },
   { id: 'langues', label: 'Langues', icon: '💬' },
   { id: 'autre', label: 'Autre', icon: '📝' },
@@ -266,6 +270,17 @@ export async function saveWriterProfile(profile: string): Promise<void> {
   await db.put('settings', { key: 'writerProfile', value: profile });
 }
 
+export async function getFavoritePanel(): Promise<string[]> {
+  const db = await getDB();
+  const entry = await db.get('settings', 'favoritePanel');
+  return entry?.value ? JSON.parse(entry.value) : [];
+}
+
+export async function saveFavoritePanel(reviewerIds: string[]): Promise<void> {
+  const db = await getDB();
+  await db.put('settings', { key: 'favoritePanel', value: JSON.stringify(reviewerIds) });
+}
+
 // Critiques
 export async function saveCritique(chapterId: string, reviewer: string, critique: string, textSnapshot: string): Promise<CritiqueEntry> {
   const db = await getDB();
@@ -328,6 +343,7 @@ export async function createWorldBuildingEntry(
     title,
     content,
     aiFeedback: '',
+    textSummary: '',
     order: maxOrder + 1,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -347,7 +363,7 @@ export async function getWorldBuildingByBook(bookId: string): Promise<WorldBuild
 
 export async function updateWorldBuildingEntry(
   id: string,
-  updates: Partial<Pick<WorldBuildingEntry, 'title' | 'content' | 'aiFeedback' | 'order'>>
+  updates: Partial<Pick<WorldBuildingEntry, 'title' | 'content' | 'aiFeedback' | 'textSummary' | 'order'>>
 ): Promise<void> {
   const db = await getDB();
   const entry = await db.get('worldBuilding', id);
