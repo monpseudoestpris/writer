@@ -1,11 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
-from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest
-from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small
-from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT
+from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest
+from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages
+from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB
 
 load_dotenv()
 
@@ -343,6 +343,104 @@ async def world_building_custom_panel(request: WBPanelReviewRequest):
     )
 
 
+@app.post("/review-panel/analyze")
+async def review_panel_analyze(request: PanelAnalyzeRequest):
+    """Le panel analyse les retours des lecteurs et propose des modifications."""
+    chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
+    if not chosen:
+        async def error_stream():
+            yield "Aucun auteur valide dans votre panel. Configurez votre panel dans les paramètres."
+        return StreamingResponse(error_stream(), media_type="text/plain")
+
+    n = len(chosen)
+    authors_list = "\n".join(
+        f"- {REVIEWER_FIRST_NAMES.get(rid, rid)} ({REVIEWER_NAMES.get(rid, rid)})"
+        for rid in chosen
+    )
+    authors_personalities = "\n\n".join(
+        f"{REVIEWER_FIRST_NAMES.get(rid, rid)} :\n{REVIEWER_PROMPTS[rid]}"
+        for rid in chosen
+    )
+
+    panel_system = PANEL_ANALYZE_READERS_PROMPT.format(
+        nb_authors=n,
+        authors_list=authors_list,
+        authors_personalities=authors_personalities,
+        reader_feedback=request.reader_feedback
+    )
+
+    parts = [panel_system]
+    if request.book_summary:
+        parts.append(f"\n\nRÉSUMÉ DE L'OUVRAGE : {request.book_summary}")
+    if request.chapter_summary:
+        parts.append(f"\n\nRÉSUMÉ DU CHAPITRE : {request.chapter_summary}")
+    if request.writer_profile:
+        parts.append(f"\n\nProfil de l'auteur : {request.writer_profile}")
+
+    full_prompt = "".join(parts)
+    chosen_names = [REVIEWER_FIRST_NAMES.get(rid, rid) for rid in chosen]
+
+    async def stream_with_header():
+        yield f"*🔍 Votre panel : {', '.join(chosen_names)} analysent les retours des lecteurs…*\n\n---\n\n"
+        async for chunk in stream_critique_from_mistral(request.text, full_prompt):
+            yield chunk
+
+    return StreamingResponse(
+        stream_with_header(),
+        media_type="text/plain",
+        headers={"X-Panel-Authors": ",".join(chosen)}
+    )
+
+
+@app.post("/world-building/panel/analyze")
+async def wb_panel_analyze(request: WBPanelAnalyzeRequest):
+    """Le panel analyse les retours des lecteurs sur le world building."""
+    chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
+    if not chosen:
+        async def error_stream():
+            yield "Aucun auteur valide dans votre panel. Configurez votre panel dans les paramètres."
+        return StreamingResponse(error_stream(), media_type="text/plain")
+
+    n = len(chosen)
+    authors_list = "\n".join(
+        f"- {REVIEWER_FIRST_NAMES.get(rid, rid)} ({REVIEWER_NAMES.get(rid, rid)})"
+        for rid in chosen
+    )
+    authors_personalities = "\n\n".join(
+        f"{REVIEWER_FIRST_NAMES.get(rid, rid)} :\n{REVIEWER_PROMPTS[rid]}"
+        for rid in chosen
+    )
+
+    panel_system = WB_PANEL_ANALYZE_READERS_PROMPT.format(
+        nb_authors=n,
+        authors_list=authors_list,
+        authors_personalities=authors_personalities,
+        category=request.category,
+        title=request.entry_title,
+        reader_feedback=request.reader_feedback
+    )
+
+    parts = [panel_system]
+    if request.book_summary:
+        parts.append(f"\n\nRÉSUMÉ DE L'OUVRAGE : {request.book_summary}")
+    if request.all_entries_context:
+        parts.append(f"\n\nAUTRES ÉLÉMENTS DE L'UNIVERS :\n{request.all_entries_context}")
+
+    full_prompt = "".join(parts)
+    chosen_names = [REVIEWER_FIRST_NAMES.get(rid, rid) for rid in chosen]
+
+    async def stream_with_header():
+        yield f"*🔍 Votre panel : {', '.join(chosen_names)} analysent les retours sur « {request.entry_title} »…*\n\n---\n\n"
+        async for chunk in stream_critique_from_mistral(request.entry_content, full_prompt):
+            yield chunk
+
+    return StreamingResponse(
+        stream_with_header(),
+        media_type="text/plain",
+        headers={"X-Panel-Authors": ",".join(chosen)}
+    )
+
+
 @app.post("/world-building/autofill")
 async def world_building_autofill(request: WorldBuildingAutoFillRequest):
     # Find the right prompt for this category
@@ -380,6 +478,244 @@ async def world_building_autofill(request: WorldBuildingAutoFillRequest):
         stream_from_mistral_small(prompt, user_content),
         media_type="text/plain"
     )
+
+
+@app.post("/chat")
+async def chat_with_reviewer(request: ChatRequest):
+    """Chat multi-tour avec un auteur ou un panel, avec prompt caching Mistral."""
+    
+    # Build system prompt based on who we're chatting with
+    if request.reviewer_ids and len(request.reviewer_ids) > 0:
+        # Panel mode
+        chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
+        if not chosen:
+            async def error_stream():
+                yield "Aucun auteur valide dans votre panel."
+            return StreamingResponse(error_stream(), media_type="text/plain")
+        
+        n = len(chosen)
+        authors_list = "\n".join(
+            f"- {REVIEWER_FIRST_NAMES.get(rid, rid)} ({REVIEWER_NAMES.get(rid, rid)})"
+            for rid in chosen
+        )
+        authors_personalities = "\n\n".join(
+            f"{REVIEWER_FIRST_NAMES.get(rid, rid)} :\n{REVIEWER_PROMPTS[rid]}"
+            for rid in chosen
+        )
+        system_prompt = CHAT_PANEL_PROMPT.format(
+            nb_authors=n,
+            authors_list=authors_list,
+            authors_personalities=authors_personalities
+        )
+    elif request.reviewer_id and request.reviewer_id in REVIEWER_PROMPTS:
+        # Single reviewer mode
+        rid = request.reviewer_id
+        system_prompt = CHAT_SINGLE_REVIEWER_PROMPT.format(
+            reviewer_name=REVIEWER_NAMES.get(rid, rid),
+            reviewer_first_name=REVIEWER_FIRST_NAMES.get(rid, rid),
+            reviewer_personality=REVIEWER_PROMPTS[rid]
+        )
+    else:
+        # Generic consultant
+        system_prompt = (
+            "Tu es un consultant littéraire expert, bienveillant et constructif. "
+            "Tu discutes avec l'auteur de son texte. "
+            "Quand il te demande des propositions de réécriture, tu proposes des passages concrets "
+            "délimités par des balises ```suggestion\n...\n```.\n"
+            "Tu cites le passage original en italique avant ta proposition.\n"
+            "Réponds toujours en français, sois concis mais substantiel (200-400 mots)."
+        )
+    
+    # Add context type
+    if request.context_type == "world_building":
+        system_prompt += CHAT_CONTEXT_WB.format(
+            category=request.category or "Général",
+            title=request.entry_title or "Sans titre"
+        )
+    else:
+        system_prompt += CHAT_CONTEXT_CHAPTER
+    
+    # Add meta-context
+    if request.book_summary:
+        system_prompt += f"\nRESUME DE L'OUVRAGE : {request.book_summary}"
+    if request.chapter_summary:
+        system_prompt += f"\nRESUME DU CHAPITRE : {request.chapter_summary}"
+    if request.writer_profile:
+        system_prompt += f"\nPROFIL DE L'AUTEUR : {request.writer_profile}"
+    if request.all_entries_context:
+        system_prompt += f"\nAUTRES ÉLÉMENTS DE L'UNIVERS :\n{request.all_entries_context}"
+    
+    # Build messages array for Mistral (prefix stays stable for caching)
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    # First user message: the original text
+    if request.context_type == "world_building":
+        messages.append({"role": "user", "content": (
+            f"Voici l'élément de world building que tu viens de critiquer :\n\n"
+            f"[DÉBUT DU CONTENU]\n{request.text}\n[FIN DU CONTENU]"
+        )})
+    else:
+        messages.append({"role": "user", "content": (
+            f"Voici le texte que tu viens de critiquer :\n\n"
+            f"[DÉBUT DU TEXTE À CRITIQUER]\n{request.text}\n[FIN DU TEXTE À CRITIQUER]"
+        )})
+    
+    # First assistant message: the initial feedback/critique
+    messages.append({"role": "assistant", "content": request.initial_feedback})
+    
+    # Inject accumulated summaries of past exchanges (if any)
+    # The prefix above (system + text + critique) stays identical → Mistral caches it
+    if request.chat_summaries and len(request.chat_summaries) > 0:
+        summaries_text = "\n\n---\n\n".join(
+            f"**Résumé échange {i+1} :** {s}"
+            for i, s in enumerate(request.chat_summaries)
+        )
+        messages.append({"role": "user", "content": (
+            f"[Voici un résumé de nos échanges précédents pour contexte :]\n\n{summaries_text}"
+        )})
+        messages.append({"role": "assistant", "content": (
+            "Compris, j'ai bien le contexte de nos échanges précédents. Continuons."
+        )})
+    
+    # Recent conversation history (only unsummarized messages sent by frontend)
+    for msg in request.messages:
+        messages.append({"role": msg.role, "content": msg.content})
+    
+    return StreamingResponse(
+        stream_chat_from_mistral(messages),
+        media_type="text/plain"
+    )
+
+
+@app.post("/rewrite")
+async def rewrite_text(request: RewriteRequest):
+    """Stream a rewritten version of the text from a reviewer."""
+    import random
+
+    # Build the system prompt based on reviewer type
+    if request.reviewer_ids and len(request.reviewer_ids) > 0:
+        chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
+        if not chosen:
+            chosen = random.sample(list(REVIEWER_PROMPTS.keys()), min(3, len(REVIEWER_PROMPTS)))
+        n = len(chosen)
+        authors_list = ", ".join(REVIEWER_NAMES.get(rid, rid) for rid in chosen)
+        authors_personalities = "\n\n".join(
+            f"{REVIEWER_FIRST_NAMES.get(rid, rid)} :\n{REVIEWER_PROMPTS[rid]}"
+            for rid in chosen
+        )
+        system_prompt = REWRITE_PANEL_PROMPT.format(
+            nb_authors=n,
+            authors_list=authors_list,
+            authors_personalities=authors_personalities
+        )
+    elif request.reviewer_id and request.reviewer_id in REVIEWER_PROMPTS:
+        rid = request.reviewer_id
+        system_prompt = REWRITE_SINGLE_PROMPT.format(
+            reviewer_name=REVIEWER_NAMES.get(rid, rid),
+            reviewer_personality=REVIEWER_PROMPTS[rid]
+        )
+    else:
+        system_prompt = REWRITE_GENERIC_PROMPT
+
+    # Add context type
+    if request.context_type == "world_building":
+        system_prompt += REWRITE_CONTEXT_WB.format(
+            category=request.category or "Général",
+            title=request.entry_title or "Sans titre"
+        )
+    else:
+        system_prompt += REWRITE_CONTEXT_CHAPTER
+
+    # Add meta-context
+    if request.book_summary:
+        system_prompt += f"\nRÉSUMÉ DE L'OUVRAGE : {request.book_summary}"
+    if request.chapter_summary:
+        system_prompt += f"\nRÉSUMÉ DU CHAPITRE : {request.chapter_summary}"
+    if request.writer_profile:
+        system_prompt += f"\nPROFIL DE L'AUTEUR : {request.writer_profile}"
+    if request.all_entries_context:
+        system_prompt += f"\nAUTRES ÉLÉMENTS DE L'UNIVERS :\n{request.all_entries_context}"
+
+    # Build user message
+    user_content = f"[DÉBUT DU TEXTE À RÉÉCRIRE]\n{request.text}\n[FIN DU TEXTE À RÉÉCRIRE]"
+    if request.instructions:
+        user_content += f"\n\nINSTRUCTIONS SPÉCIFIQUES DE L'AUTEUR :\n{request.instructions}"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+
+    return StreamingResponse(
+        stream_chat_from_mistral(messages),
+        media_type="text/plain"
+    )
+
+
+@app.post("/chat/summarize")
+async def summarize_chat(request: ChatSummarizeRequest):
+    """Résume un batch de messages de chat via mistral-small."""
+    msgs = [{"role": m.role, "content": m.content} for m in request.messages]
+    summary = await summarize_chat_messages(msgs)
+    return {"summary": summary}
+
+
+@app.post("/import-document")
+async def import_document(file: UploadFile = File(...)):
+    """Importe un .docx ou .odt et retourne {title, chapters}."""
+    from backend.document_import import parse_docx, parse_odt
+
+    filename = file.filename or "document"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext not in ("docx", "doc", "odt"):
+        return {"error": "Format non supporté. Utilisez .docx ou .odt"}
+
+    file_bytes = await file.read()
+
+    try:
+        if ext in ("docx", "doc"):
+            result = parse_docx(file_bytes)
+        else:
+            result = parse_odt(file_bytes)
+    except Exception as e:
+        return {"error": f"Erreur de lecture du document : {e}"}
+
+    if not result.get("title"):
+        result["title"] = filename.rsplit(".", 1)[0]
+
+    return result
+
+
+@app.post("/import-document/debug")
+async def import_document_debug(file: UploadFile = File(...)):
+    """Debug : montre les styles et niveaux détectés pour chaque paragraphe."""
+    from docx import Document
+    from docx.text.paragraph import Paragraph
+    import io
+
+    filename = file.filename or "document"
+    file_bytes = await file.read()
+    doc = Document(io.BytesIO(file_bytes))
+
+    paras = []
+    for i, para in enumerate(doc.paragraphs):
+        text = para.text.strip()
+        if not text:
+            continue
+        style_name = para.style.name if para.style else ""
+        style_id = para.style.style_id if para.style else ""
+        from backend.document_import import _detect_heading_level_docx
+        level = _detect_heading_level_docx(para, style_name)
+        paras.append({
+            "index": i,
+            "style_name": style_name,
+            "style_id": style_id,
+            "heading_level": level,
+            "text_preview": text[:120],
+        })
+
+    return {"filename": filename, "total_paragraphs": len(doc.paragraphs), "detected": paras[:100]}
 
 
 if __name__ == "__main__":

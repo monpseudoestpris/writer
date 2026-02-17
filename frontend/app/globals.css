@@ -120,6 +120,20 @@ html, body {
 .editor-area .tiptap hr { border-top-color: rgba(0, 0, 0, 0.15); }
 .editor-area .tiptap p.is-editor-empty:first-child::before { color: #999; }
 
+/* Highlight for diff changes in editor */
+.editor-area .tiptap mark,
+.tiptap mark {
+  background-color: rgba(52, 211, 153, 0.25);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  border-bottom: 2px solid rgba(52, 211, 153, 0.6);
+}
+.editor-area .tiptap mark {
+  background-color: rgba(34, 160, 100, 0.2);
+  border-bottom-color: rgba(34, 160, 100, 0.5);
+}
+
 .tiptap h1:first-child,
 .tiptap h2:first-child,
 .tiptap h3:first-child {

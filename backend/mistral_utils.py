@@ -124,3 +124,45 @@ async def stream_from_mistral_small(system_prompt: str, user_content: str) -> As
     ):
         if chunk.data.choices[0].delta.content:
             yield chunk.data.choices[0].delta.content
+
+
+async def summarize_chat_messages(messages: list[dict]) -> str:
+    """Summarize a batch of chat messages using mistral-small-latest (fast & cheap)."""
+    client = get_mistral_client()
+    formatted = "\n".join(
+        f"{'Auteur' if m['role']=='user' else 'Critique'}: {m['content']}"
+        for m in messages
+    )
+    prompt = (
+        "Résume cette conversation entre un auteur et son critique/conseiller littéraire. "
+        "Conserve TOUS les points clés :\n"
+        "- Les suggestions de réécriture proposées (cite les passages importants)\n"
+        "- Les décisions prises par l'auteur (accepté/refusé)\n"
+        "- Les points de discussion importants\n"
+        "- Les demandes spécifiques de l'auteur\n"
+        "Sois concis mais exhaustif. Réponds en français, 150-250 mots maximum."
+    )
+    response = await client.chat.complete_async(
+        model="mistral-small-latest",
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": formatted}
+        ]
+    )
+    return response.choices[0].message.content
+
+
+async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, None]:
+    """Stream a multi-turn chat response from mistral-large-latest.
+    
+    Messages should include system prompt and full conversation history.
+    Mistral automatically applies prefix caching on the shared prefix.
+    """
+    client = get_mistral_client()
+    
+    async for chunk in await client.chat.stream_async(
+        model="mistral-large-latest",
+        messages=messages
+    ):
+        if chunk.data.choices[0].delta.content:
+            yield chunk.data.choices[0].delta.content

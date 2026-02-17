@@ -72,3 +72,65 @@ class WBPanelReviewRequest(BaseModel):
     reviewer_ids: list[str]
     book_summary: Optional[str] = None
     all_entries_context: Optional[str] = None
+
+class PanelAnalyzeRequest(BaseModel):
+    text: str
+    reviewer_ids: list[str]
+    reader_feedback: str
+    writer_profile: Optional[str] = None
+    book_summary: Optional[str] = None
+    chapter_summary: Optional[str] = None
+
+class WBPanelAnalyzeRequest(BaseModel):
+    entry_title: str
+    entry_content: str
+    category: str
+    reviewer_ids: list[str]
+    reader_feedback: str
+    book_summary: Optional[str] = None
+    all_entries_context: Optional[str] = None
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+class ChatSummarizeRequest(BaseModel):
+    messages: list[ChatMessage]
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    chat_summaries: Optional[list[str]] = None  # accumulated summaries of past exchanges
+    # Who are we chatting with
+    reviewer_id: Optional[str] = None  # Single reviewer
+    reviewer_ids: Optional[list[str]] = None  # Panel
+    # Context type
+    context_type: str  # "chapter" or "world_building"
+    # Original content
+    text: str
+    # Initial feedback (the critique that started the conversation)
+    initial_feedback: str
+    # Chapter context
+    writer_profile: Optional[str] = None
+    book_summary: Optional[str] = None
+    chapter_summary: Optional[str] = None
+    # WB context
+    entry_title: Optional[str] = None
+    category: Optional[str] = None
+    all_entries_context: Optional[str] = None
+
+class RewriteRequest(BaseModel):
+    text: str
+    instructions: Optional[str] = None  # user instructions for the rewrite
+    context_type: str  # "chapter" or "world_building"
+    # Reviewer(s)
+    reviewer_id: Optional[str] = None
+    reviewer_ids: Optional[list[str]] = None
+    # Context
+    writer_profile: Optional[str] = None
+    book_summary: Optional[str] = None
+    chapter_summary: Optional[str] = None
+    entry_title: Optional[str] = None
+    category: Optional[str] = None
+    all_entries_context: Optional[str] = None
+
+

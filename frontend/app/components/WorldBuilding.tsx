@@ -5,6 +5,7 @@ import {
   WorldBuildingEntry,
   WBFeedbackEntry,
   WB_CATEGORIES,
+  TextVersion,
   getWorldBuildingByBook,
   createWorldBuildingEntry,
   updateWorldBuildingEntry,
@@ -14,6 +15,12 @@ import {
   deleteWBFeedback,
   getFavoritePanel,
   saveFavoritePanel,
+  getChatSession,
+  saveChatSession,
+  ChatSession,
+  saveTextVersion,
+  getTextVersions,
+  deleteTextVersion,
 } from '../lib/db';
 import RichEditor, { EditorToolbar } from './RichEditor';
 import type { Editor } from '@tiptap/react';
@@ -74,14 +81,93 @@ function renderMarkdownTable(lines: string[], keyBase: number): ReactNode {
   );
 }
 
+// Parse AI feedback into selectable comment blocks
 // Render full markdown content with table support
-function renderMarkdownContent(text: string, lineRenderer: (line: string, i: number) => ReactNode): ReactNode[] {
+function renderMarkdownContent(text: string, lineRenderer: (line: string, i: number) => ReactNode, onApplySuggestion?: (text: string, original?: string) => void): ReactNode[] {
   const lines = text.split('\n');
   const elements: ReactNode[] = [];
   let i = 0;
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // Detect fenced code blocks: ```lang ... ```
+    const fenceMatch = line.match(/^```(\w*)\s*$/);
+    if (fenceMatch) {
+      const lang = fenceMatch[1];
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].match(/^```\s*$/)) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      const codeContent = codeLines.join('\n');
+
+      if (lang === 'suggestion') {
+        // Parse ORIGINAL: ... --- REMPLACEMENT: ... format
+        const separatorIdx = codeLines.findIndex(l => l.trim() === '---');
+        let originalText: string | undefined;
+        let replacementText: string;
+
+        if (separatorIdx !== -1) {
+          const beforeSep = codeLines.slice(0, separatorIdx);
+          const afterSep = codeLines.slice(separatorIdx + 1);
+          // Remove "ORIGINAL:" prefix line
+          const origStart = beforeSep.findIndex(l => /^ORIGINAL\s*:/i.test(l.trim()));
+          if (origStart !== -1) {
+            const origLabel = beforeSep[origStart].replace(/^ORIGINAL\s*:/i, '').trim();
+            originalText = [origLabel, ...beforeSep.slice(origStart + 1)].filter(l => l).join('\n').trim();
+          } else {
+            originalText = beforeSep.join('\n').trim();
+          }
+          // Remove "REMPLACEMENT:" prefix line
+          const replStart = afterSep.findIndex(l => /^REMPLACEMENT\s*:/i.test(l.trim()));
+          if (replStart !== -1) {
+            const replLabel = afterSep[replStart].replace(/^REMPLACEMENT\s*:/i, '').trim();
+            replacementText = [replLabel, ...afterSep.slice(replStart + 1)].filter(l => l).join('\n').trim();
+          } else {
+            replacementText = afterSep.join('\n').trim();
+          }
+        } else {
+          replacementText = codeContent;
+        }
+
+        elements.push(
+          <div key={`suggestion-${i}`} className="my-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 overflow-hidden">
+            <div className="px-4 py-2 bg-emerald-500/10 border-b border-emerald-500/20 flex items-center justify-between">
+              <span className="text-emerald-400 text-xs font-semibold uppercase tracking-wider">✍️ Suggestion de réécriture</span>
+              {onApplySuggestion && (
+                <button
+                  onClick={() => onApplySuggestion(replacementText, originalText)}
+                  className="px-3 py-1 text-xs font-medium rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-all"
+                >
+                  Appliquer
+                </button>
+              )}
+            </div>
+            {originalText && (
+              <div className="px-4 py-2 border-b border-white/5">
+                <div className="text-xs text-red-400/70 font-semibold uppercase mb-1">Passage original</div>
+                <div className="text-sm text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap line-through decoration-red-400/40">{originalText}</div>
+              </div>
+            )}
+            <div className="px-4 py-3">
+              {originalText && <div className="text-xs text-emerald-400/70 font-semibold uppercase mb-1">Remplacement</div>}
+              <div className="text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{replacementText}</div>
+            </div>
+          </div>
+        );
+      } else {
+        elements.push(
+          <pre key={`code-${i}`} className="my-2 p-3 rounded-lg bg-[var(--bg-surface)] border border-white/5 overflow-x-auto">
+            <code className="text-sm text-[var(--text-secondary)] leading-relaxed">{codeContent}</code>
+          </pre>
+        );
+      }
+      continue;
+    }
+
     if (/\|/.test(line) && !/^[-*_]{3,}$/.test(line.trim())) {
       const tableLines: string[] = [];
       while (i < lines.length && /\|/.test(lines[i]) && !/^[-*_]{3,}$/.test(lines[i].trim())) {
@@ -188,6 +274,33 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
   const [summaryHeight, setSummaryHeight] = useState(250);
   const [favoritePanel, setFavoritePanel] = useState<string[]>([]);
   const [showPanelConfig, setShowPanelConfig] = useState(false);
+  // Chat with reviewer
+  const [chatMessages, setChatMessages] = useState<{role: string; content: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatContext, setChatContext] = useState<{
+    reviewerId?: string;
+    reviewerIds?: string[];
+    initialFeedback: string;
+  } | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  // Chat summarization: every 5 messages, summarize batch with mistral-small
+  const [chatSummaries, setChatSummaries] = useState<string[]>([]);
+  const [summarizedCount, setSummarizedCount] = useState(0);
+  const chatSummariesRef = useRef<string[]>([]);
+  const summarizedCountRef = useRef(0);
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  // Text versioning (git-like snapshots)
+  const [versions, setVersions] = useState<TextVersion[]>([]);
+  const [showVersionPanel, setShowVersionPanel] = useState(false);
+  // Rewrite
+  const [rewriteLoading, setRewriteLoading] = useState(false);
+  const [showRewriteModal, setShowRewriteModal] = useState(false);
+  const [rewriteResult, setRewriteResult] = useState('');
+  const [rewriteInstructions, setRewriteInstructions] = useState('');
+
   // Refs to track latest values for unmount flush
   const selectedEntryRef = useRef<WorldBuildingEntry | null>(null);
   const editContentRef = useRef('');
@@ -341,6 +454,8 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     setShowSummaryPopup(false);
     // Load feedback history
     getWBFeedbacksByEntry(entry.id).then(setFeedbackHistory);
+    // Load version history
+    getTextVersions(entry.id).then(setVersions);
     // TipTap handles content via prop
   };
 
@@ -428,6 +543,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   const handleGetFeedback = async () => {
     if (!selectedEntry || !htmlToPlainText(editContent).trim()) return;
+    setChatOpen(false); setChatMessages([]); setChatContext(null);
     setLoadingFeedback(true);
 
     // Prepend text summary to feedback if available
@@ -497,6 +613,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   const handleWBReadersPanel = async () => {
     if (!selectedEntry || !htmlToPlainText(editContent).trim()) return;
+    setChatOpen(false); setChatMessages([]); setChatContext(null);
     setLoadingFeedback(true);
 
     const summaryHeader = textSummary
@@ -559,6 +676,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
 
   const handleWBCustomPanel = async () => {
     if (!selectedEntry || !htmlToPlainText(editContent).trim() || favoritePanel.length === 0) return;
+    setChatOpen(false); setChatMessages([]); setChatContext(null);
     setLoadingFeedback(true);
 
     const summaryHeader = textSummary
@@ -619,12 +737,204 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     }
   };
 
+  const handleWBPanelAnalyzeFeedback = async () => {
+    if (!selectedEntry || !htmlToPlainText(editContent).trim() || favoritePanel.length === 0 || !aiFeedback.trim()) return;
+    setChatOpen(false); setChatMessages([]); setChatContext(null);
+    setLoadingFeedback(true);
+
+    const summaryHeader = textSummary
+      ? `**📋 Résumé du texte :**\n${textSummary}\n\n---\n\n`
+      : '';
+    const readerFeedback = aiFeedback;
+    setAiFeedback(summaryHeader);
+
+    const plainContent = htmlToPlainText(editContent);
+
+    const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
+    const contextParts = otherEntries.map(e => {
+      const cat = getCategoryInfo(e.category);
+      return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
+    });
+    const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
+
+    try {
+      const response = await fetch('http://localhost:8000/world-building/panel/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_title: editTitle,
+          entry_content: plainContent,
+          category: getCategoryInfo(selectedEntry.category).label,
+          reviewer_ids: favoritePanel,
+          reader_feedback: readerFeedback,
+          book_summary: bookSummary || null,
+          all_entries_context: allEntriesContext,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('Pas de stream disponible');
+
+      let fullFeedback = summaryHeader;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        fullFeedback += chunk;
+        setAiFeedback(prev => prev + chunk);
+      }
+
+      if (fullFeedback) {
+        const saved = await saveWBFeedback(selectedEntry.id, 'Analyse des retours', fullFeedback);
+        setFeedbackHistory(prev => [saved, ...prev]);
+        setViewingFeedbackId(saved.id);
+        await updateWorldBuildingEntry(selectedEntry.id, { aiFeedback: fullFeedback });
+        setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, aiFeedback: fullFeedback } : e));
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erreur';
+      setAiFeedback(`Erreur : ${msg}`);
+    } finally {
+      setLoadingFeedback(false);
+    }
+  };
+
   const togglePanelMember = async (id: string) => {
     const updated = favoritePanel.includes(id)
       ? favoritePanel.filter(r => r !== id)
       : [...favoritePanel, id];
     setFavoritePanel(updated);
     await saveFavoritePanel(updated);
+  };
+
+  const startChat = async (initialFeedback: string, reviewerId?: string, reviewerIds?: string[], sourceId?: string) => {
+    setChatContext({ reviewerId, reviewerIds, initialFeedback });
+    setChatOpen(true);
+    setChatInput('');
+
+    const sessionId = sourceId || crypto.randomUUID();
+    setChatSessionId(sessionId);
+    if (sourceId) {
+      const existing = await getChatSession(sourceId);
+      if (existing) {
+        setChatMessages(existing.messages);
+        setChatSummaries(existing.summaries);
+        chatSummariesRef.current = existing.summaries;
+        setSummarizedCount(existing.summarizedCount);
+        summarizedCountRef.current = existing.summarizedCount;
+        return;
+      }
+    }
+    setChatMessages([]);
+    setChatSummaries([]);
+    chatSummariesRef.current = [];
+    setSummarizedCount(0);
+    summarizedCountRef.current = 0;
+  };
+
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || chatLoading || !chatContext || !selectedEntry) return;
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    const newMessages = [...chatMessages, { role: 'user', content: userMessage }];
+    setChatMessages(newMessages);
+    setChatLoading(true);
+
+    try {
+      const plainContent = htmlToPlainText(editContent);
+      const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
+      const contextParts = otherEntries.map(e => {
+        const cat = getCategoryInfo(e.category);
+        return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
+      });
+      const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
+
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: newMessages.slice(summarizedCountRef.current),
+          chat_summaries: chatSummariesRef.current.length > 0 ? chatSummariesRef.current : null,
+          reviewer_id: chatContext.reviewerId || null,
+          reviewer_ids: chatContext.reviewerIds || null,
+          context_type: 'world_building',
+          text: plainContent,
+          initial_feedback: chatContext.initialFeedback,
+          book_summary: bookSummary || null,
+          entry_title: editTitle || null,
+          category: getCategoryInfo(selectedEntry.category).label,
+          all_entries_context: allEntriesContext,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('Pas de stream disponible');
+
+      let assistantMsg = '';
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        assistantMsg += chunk;
+        setChatMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: 'assistant', content: assistantMsg };
+          return updated;
+        });
+      }
+
+      // Auto-summarize every 5 messages to keep context compact
+      const allMsgs = [...newMessages, { role: 'assistant', content: assistantMsg }];
+      const unsummarized = allMsgs.length - summarizedCountRef.current;
+
+      if (unsummarized >= 5) {
+        const batch = allMsgs.slice(summarizedCountRef.current, summarizedCountRef.current + 5);
+        setIsSummarizing(true);
+        try {
+          const sumRes = await fetch('http://localhost:8000/chat/summarize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: batch }),
+          });
+          if (sumRes.ok) {
+            const { summary } = await sumRes.json();
+            chatSummariesRef.current = [...chatSummariesRef.current, summary];
+            setChatSummaries(chatSummariesRef.current);
+            summarizedCountRef.current += 5;
+            setSummarizedCount(summarizedCountRef.current);
+          }
+        } catch { /* silently continue */ }
+        setIsSummarizing(false);
+      }
+
+      // Save chat session to DB
+      if (chatSessionId) {
+        const session: ChatSession = {
+          id: chatSessionId,
+          contextType: 'world_building',
+          messages: allMsgs,
+          summaries: chatSummariesRef.current,
+          summarizedCount: summarizedCountRef.current,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        saveChatSession(session).catch(() => {});
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erreur';
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `⚠️ Erreur : ${msg}` }]);
+    } finally {
+      setChatLoading(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
   };
 
   const handleAutofill = async () => {
@@ -694,6 +1004,114 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
     } finally {
       setLoadingAutofill(false);
     }
+  };
+
+  // ======================
+  // TEXT VERSIONING
+  // ======================
+
+  const saveSnapshot = async (label: string) => {
+    if (!selectedEntry) return;
+    const version = await saveTextVersion(
+      selectedEntry.id,
+      'world_building',
+      editTitle,
+      editContent,
+      label
+    );
+    setVersions(prev => [version, ...prev]);
+    return version;
+  };
+
+  const restoreVersion = async (version: TextVersion) => {
+    if (!selectedEntry) return;
+    if (!confirm(`Restaurer la version « ${version.label} » du ${new Date(version.createdAt).toLocaleString('fr-FR')} ?\n\nLa version actuelle sera sauvegardée automatiquement.`)) return;
+    await saveSnapshot(`Avant restauration de « ${version.label} »`);
+    setEditContent(version.content);
+    editContentRef.current = version.content;
+    if (wbEditorRef.current) {
+      wbEditorRef.current.commands.setContent(version.content);
+    }
+    await updateWorldBuildingEntry(selectedEntry.id, { content: version.content });
+    setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, content: version.content, updatedAt: new Date() } : e));
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    if (!confirm('Supprimer cette version ?')) return;
+    await deleteTextVersion(versionId);
+    setVersions(prev => prev.filter(v => v.id !== versionId));
+  };
+
+  // ======================
+  // REWRITE
+  // ======================
+
+  const handleRewrite = async () => {
+    if (!selectedEntry || !htmlToPlainText(editContent).trim()) return;
+    setRewriteLoading(true);
+    setRewriteResult('');
+
+    try {
+      const plainContent = htmlToPlainText(editContent);
+      const otherEntries = entries.filter(e => e.id !== selectedEntry.id);
+      const contextParts = otherEntries.map(e => {
+        const cat = getCategoryInfo(e.category);
+        return `[${cat.label}] ${e.title} :\n${htmlToPlainText(e.content)}`;
+      });
+      const allEntriesContext = contextParts.length > 0 ? contextParts.join('\n\n---\n\n') : null;
+
+      const response = await fetch('http://localhost:8000/rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: plainContent,
+          instructions: rewriteInstructions || null,
+          context_type: 'world_building',
+          reviewer_id: selectedReviewer || null,
+          reviewer_ids: null,
+          book_summary: bookSummary || null,
+          entry_title: editTitle || null,
+          category: getCategoryInfo(selectedEntry.category).label,
+          all_entries_context: allEntriesContext,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('Pas de stream');
+
+      let result = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        result += chunk;
+        setRewriteResult(prev => prev + chunk);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erreur';
+      setRewriteResult(`⚠️ Erreur : ${msg}`);
+    } finally {
+      setRewriteLoading(false);
+    }
+  };
+
+  const applyRewrite = async (newContent: string) => {
+    if (!selectedEntry) return;
+    await saveSnapshot('Avant réécriture IA');
+    const htmlContent = newContent.split('\n\n').map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+    setEditContent(htmlContent);
+    editContentRef.current = htmlContent;
+    if (wbEditorRef.current) {
+      wbEditorRef.current.commands.setContent(htmlContent);
+    }
+    await updateWorldBuildingEntry(selectedEntry.id, { content: htmlContent });
+    setEntries(prev => prev.map(e => e.id === selectedEntry.id ? { ...e, content: htmlContent, updatedAt: new Date() } : e));
+    setShowRewriteModal(false);
+    setRewriteResult('');
+    setRewriteInstructions('');
   };
 
   return (
@@ -936,6 +1354,29 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                       ) : (
                         <><span>🤖</span> {htmlToPlainText(editContent).trim() ? 'Développer par IA' : 'Remplir par IA'}</>                      )}
                     </button>
+                    <button
+                      onClick={() => { setRewriteResult(''); setRewriteInstructions(''); setShowRewriteModal(true); }}
+                      disabled={loadingFeedback || rewriteLoading || !htmlToPlainText(editContent).trim()}
+                      className="px-3 py-2 bg-purple-500/5 hover:bg-purple-500/15 text-purple-400/80 text-sm rounded-lg transition-all disabled:opacity-30 flex items-center gap-1"
+                      title="Demander une réécriture IA"
+                    >
+                      ✍️ Réécriture
+                    </button>
+                    <div className="w-px h-5 bg-[var(--border-subtle)]" />
+                    <button
+                      onClick={() => { if (selectedEntry) { getTextVersions(selectedEntry.id).then(setVersions); setShowVersionPanel(true); } }}
+                      className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-xs px-2 py-1 rounded-lg hover:bg-[var(--accent)]/10 flex items-center gap-1"
+                      title="Historique des versions"
+                    >
+                      📚 {versions.length > 0 && <span className="text-[var(--accent)]">{versions.length}</span>}
+                    </button>
+                    <button
+                      onClick={() => saveSnapshot('Sauvegarde manuelle')}
+                      className="text-[var(--text-muted)] hover:text-emerald-400 transition-colors text-xs px-1.5 py-1 rounded-lg hover:bg-emerald-500/10"
+                      title="Sauvegarder un snapshot"
+                    >
+                      💾
+                    </button>
                   </div>
                 </div>
                 {/* Scrollable editor */}
@@ -1093,6 +1534,16 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                       >
                         ✏️ Modifier panel
                       </button>
+                      {aiFeedback.trim() && favoritePanel.length > 0 && (
+                        <button
+                          className="px-4 py-2.5 rounded-lg text-sm font-medium transition-all border border-purple-500/50 text-purple-400 hover:bg-purple-500/15 disabled:opacity-30 disabled:cursor-not-allowed"
+                          onClick={() => { setViewingFeedbackId(null); handleWBPanelAnalyzeFeedback(); }}
+                          disabled={loadingFeedback || loadingAutofill || !htmlToPlainText(editContent).trim()}
+                          title="Votre panel analyse les retours et propose des modifications"
+                        >
+                          🔍 Analyser retours
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1115,6 +1566,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                             onClick={() => {
                               setViewingFeedbackId(fb.id);
                               setAiFeedback(fb.feedback);
+                              setChatOpen(false); setChatMessages([]); setChatContext(null);
                             }}
                           >
                             <div className="flex items-center gap-1.5">
@@ -1126,10 +1578,19 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                                   e.stopPropagation();
                                   if (!confirm('Supprimer cet avis ?')) return;
                                   await deleteWBFeedback(fb.id);
-                                  setFeedbackHistory(prev => prev.filter(f => f.id !== fb.id));
+                                  const remaining = feedbackHistory.filter(f => f.id !== fb.id);
+                                  setFeedbackHistory(remaining);
                                   if (viewingFeedbackId === fb.id) {
-                                    setViewingFeedbackId(null);
-                                    setAiFeedback('');
+                                    // Was viewing the deleted one: switch to most recent remaining or clear
+                                    if (remaining.length > 0) {
+                                      const latest = remaining[remaining.length - 1];
+                                      setViewingFeedbackId(latest.id);
+                                      setAiFeedback(latest.feedback);
+                                    } else {
+                                      setViewingFeedbackId(null);
+                                      setAiFeedback('');
+                                    }
+                                    setChatOpen(false); setChatMessages([]); setChatContext(null);
                                   }
                                 }}
                                 className="text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 text-sm transition-opacity flex-shrink-0"
@@ -1153,7 +1614,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                    <div className="critique-area-bg px-6 py-4">
                     {(aiFeedback || loadingFeedback) ? (
                       <div className="p-5 border border-white/10 rounded-xl">
-                        <div className="critique-content">
+                        <div className="critique-content space-y-1">
                           {renderMarkdownContent(aiFeedback, renderFeedbackLine)}
                           {loadingFeedback && <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>}
                         </div>
@@ -1164,7 +1625,104 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                         <p className="text-[var(--text-muted)]/60 text-xs mt-1">L&apos;IA analysera la cohérence, l&apos;originalité et proposera des améliorations</p>
                       </div>
                     )}
+
+                    {/* Chat button */}
+                    {aiFeedback && !loadingFeedback && (
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        {!chatOpen ? (
+                          <button
+                            onClick={() => {
+                              const fb = aiFeedback;
+                              const fbEntry = viewingFeedbackId ? feedbackHistory.find(f => f.id === viewingFeedbackId) : null;
+                              const reviewer = fbEntry?.reviewer;
+                              const chatSrcId = viewingFeedbackId || fbEntry?.id || `chat-wb-${selectedEntry?.id || 'none'}`;
+                              if (reviewer === 'Mon panel' || reviewer === 'Analyse des retours') {
+                                startChat(fb, undefined, favoritePanel, chatSrcId);
+                              } else if (reviewer === 'Panel de lecteurs') {
+                                startChat(fb, undefined, undefined, chatSrcId);
+                              } else if (reviewer && reviewers.find(r => r.name === reviewer || r.id === reviewer)) {
+                                const r = reviewers.find(rv => rv.name === reviewer || rv.id === reviewer);
+                                startChat(fb, r?.id, undefined, chatSrcId);
+                              } else {
+                                startChat(fb, undefined, undefined, chatSrcId);
+                              }
+                            }}
+                            className="w-full py-3 px-4 rounded-xl text-sm font-medium transition-all border border-sky-500/40 text-sky-400 hover:bg-sky-500/15 flex items-center justify-center gap-2"
+                          >
+                            💬 Discuter
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => { setChatOpen(false); setChatMessages([]); setChatContext(null); }}
+                            className="w-full py-2 px-4 rounded-xl text-xs font-medium transition-all text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                          >
+                            ✕ Fermer le chat
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Chat messages */}
+                    {chatOpen && chatContext && (
+                      <div className="mt-3 space-y-3">
+                        {chatMessages.map((msg, i) => (
+                          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                              msg.role === 'user'
+                                ? 'bg-sky-500/15 text-sky-200 border border-sky-500/20'
+                                : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border border-white/5'
+                            }`}>
+                              <div className="critique-content">
+                                {renderMarkdownContent(msg.content, renderFeedbackLine)}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {chatLoading && chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'user' && (
+                          <div className="flex justify-start">
+                            <div className="bg-[var(--bg-surface)] border border-white/5 rounded-2xl px-4 py-3">
+                              <span className="loading-cursor text-[var(--accent)] text-lg">▊</span>
+                            </div>
+                          </div>
+                        )}
+                        <div ref={chatEndRef} />
+                      </div>
+                    )}
                    </div>
+
+                  {/* Chat input */}
+                  {chatOpen && chatContext && (
+                    <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-4 py-3 bg-[var(--bg-secondary)]">
+                      {(chatSummaries.length > 0 || isSummarizing) && (
+                        <div className="text-xs text-[var(--text-muted)] mb-1.5 flex items-center gap-1.5">
+                          {isSummarizing ? (
+                            <><span className="inline-block w-3 h-3 border-2 border-[var(--accent)]/40 border-t-[var(--accent)] rounded-full animate-spin" /> Résumé en cours…</>
+                          ) : (
+                            <><span>📝</span> {chatSummaries.length} résumé{chatSummaries.length > 1 ? 's' : ''} · {chatMessages.length} messages</>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex gap-2 items-end">
+                        <textarea
+                          value={chatInput}
+                          onChange={e => { setChatInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }}
+                          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                          placeholder="Posez une question, demandez une réécriture…"
+                          className="input-writer flex-1 px-4 py-2.5 text-sm rounded-xl text-[var(--text-primary)] resize-none overflow-y-auto"
+                          disabled={chatLoading}
+                          rows={2}
+                          style={{ minHeight: '52px', maxHeight: '160px' }}
+                        />
+                        <button
+                          onClick={sendChatMessage}
+                          disabled={chatLoading || !chatInput.trim()}
+                          className="px-4 py-2.5 bg-sky-500/15 hover:bg-sky-500/25 text-sky-400 text-sm font-medium rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          {chatLoading ? '…' : '↑'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   </div>
                 </div>
               </div>
@@ -1234,6 +1792,149 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                 Valider
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Version History Panel */}
+      {showVersionPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowVersionPanel(false)}>
+          <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl w-[48rem] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <h3 className="text-[var(--text-primary)] font-semibold text-base">📚 Historique des versions</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { saveSnapshot('Sauvegarde manuelle'); }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 transition-all"
+                >
+                  💾 Sauvegarder maintenant
+                </button>
+                <button onClick={() => setShowVersionPanel(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-3">
+              {versions.length === 0 ? (
+                <div className="text-center py-10">
+                  <p className="text-[var(--text-muted)] text-sm mb-1">Aucune version sauvegardée</p>
+                  <p className="text-[var(--text-muted)]/60 text-xs">Les versions sont créées automatiquement avant chaque réécriture IA, ou manuellement</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {versions.map((v) => {
+                    const date = new Date(v.createdAt);
+                    const plainPreview = (() => {
+                      if (typeof document === 'undefined') return v.content.replace(/<[^>]*>/g, '').slice(0, 150);
+                      const div = document.createElement('div');
+                      div.innerHTML = v.content;
+                      return (div.innerText || div.textContent || '').slice(0, 150);
+                    })();
+                    return (
+                      <div key={v.id} className="p-4 rounded-xl border border-[var(--border-subtle)] hover:border-[var(--accent)]/30 transition-all group">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[var(--text-primary)] text-sm font-semibold">{v.label}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[var(--text-muted)] text-xs">
+                              {date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {' · '}
+                              {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <button
+                              onClick={() => restoreVersion(v)}
+                              className="px-2.5 py-1 text-xs font-medium rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] transition-all opacity-0 group-hover:opacity-100"
+                            >
+                              Restaurer
+                            </button>
+                            <button
+                              onClick={() => handleDeleteVersion(v.id)}
+                              className="text-[var(--text-muted)] hover:text-red-400 text-sm transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[var(--text-muted)] text-xs leading-relaxed line-clamp-2">{plainPreview}…</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-3 border-t border-[var(--border-subtle)] flex items-center justify-between">
+              <span className="text-[var(--text-muted)] text-xs">{versions.length} version{versions.length !== 1 ? 's' : ''}</span>
+              <button onClick={() => setShowVersionPanel(false)} className="btn-accent px-4 py-1.5 rounded-lg text-sm">Fermer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rewrite Modal */}
+      {showRewriteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => { if (!rewriteLoading) setShowRewriteModal(false); }}>
+          <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl w-[64rem] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <h3 className="text-[var(--text-primary)] font-semibold text-base">✍️ Réécriture par IA</h3>
+              <button onClick={() => { if (!rewriteLoading) setShowRewriteModal(false); }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
+            </div>
+            <div className="px-6 py-4 border-b border-[var(--border-subtle)]">
+              <label className="text-[var(--text-secondary)] text-sm font-medium mb-2 block">Instructions (optionnel)</label>
+              <textarea
+                value={rewriteInstructions}
+                onChange={e => setRewriteInstructions(e.target.value)}
+                placeholder="Ex: Rends la description plus immersive, ajoute des détails sensoriels…"
+                className="input-writer w-full px-4 py-3 text-sm rounded-xl text-[var(--text-primary)] resize-none"
+                rows={2}
+                disabled={rewriteLoading}
+              />
+              <div className="flex items-center gap-3 mt-3">
+                <span className="text-[var(--text-muted)] text-xs">Auteur :</span>
+                <span className="text-[var(--accent)] text-sm font-medium">
+                  {selectedReviewer ? (reviewers.find(r => r.id === selectedReviewer)?.name || 'Consultant') : 'Consultant générique'}
+                </span>
+                <button
+                  onClick={handleRewrite}
+                  disabled={rewriteLoading || !htmlToPlainText(editContent).trim()}
+                  className="ml-auto px-5 py-2.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 text-sm font-medium rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {rewriteLoading ? (
+                    <span className="flex items-center gap-2"><span className="inline-block w-3 h-3 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin" /> Réécriture en cours…</span>
+                  ) : (
+                    '✍️ Lancer la réécriture'
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4 min-h-[200px]">
+              {rewriteResult ? (
+                <div className="prose prose-invert max-w-none">
+                  <div className="text-[var(--text-secondary)] text-sm leading-relaxed whitespace-pre-wrap">{rewriteResult}</div>
+                  {rewriteLoading && <span className="loading-cursor text-purple-400 text-lg">▊</span>}
+                </div>
+              ) : !rewriteLoading ? (
+                <div className="text-center py-10">
+                  <p className="text-[var(--text-muted)] text-sm">La version réécrite apparaîtra ici</p>
+                  <p className="text-[var(--text-muted)]/60 text-xs mt-1">Votre texte actuel sera sauvegardé avant toute application</p>
+                </div>
+              ) : null}
+            </div>
+            {rewriteResult && !rewriteLoading && (
+              <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-between">
+                <span className="text-[var(--text-muted)] text-xs">La version actuelle sera sauvegardée automatiquement avant application</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowRewriteModal(false)}
+                    className="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-sm rounded-lg transition-all"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={() => applyRewrite(rewriteResult)}
+                    className="px-5 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-sm font-medium rounded-xl transition-all"
+                  >
+                    ✅ Appliquer cette version
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -51,6 +51,26 @@ export interface WBFeedbackEntry {
   createdAt: Date;
 }
 
+export interface ChatSession {
+  id: string;  // linked to critiqueId or wbFeedbackId
+  contextType: 'chapter' | 'world_building';
+  messages: { role: string; content: string }[];
+  summaries: string[];
+  summarizedCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TextVersion {
+  id: string;
+  sourceId: string;      // chapterId or wbEntryId
+  sourceType: 'chapter' | 'world_building';
+  title: string;         // entry/chapter title at time of snapshot
+  content: string;       // HTML content
+  label: string;         // user note or auto description
+  createdAt: Date;
+}
+
 export const WB_CATEGORIES = [
   { id: 'monde', label: 'Monde', icon: '🌍' },
   { id: 'pitch_visible', label: 'Pitch · Ce que sait le lecteur', icon: '👁️' },
@@ -101,6 +121,16 @@ interface WriterDB extends DBSchema {
     value: WBFeedbackEntry;
     indexes: { 'by-entry': string };
   };
+  chatSessions: {
+    key: string;
+    value: ChatSession;
+    indexes: { 'by-context': string };
+  };
+  textVersions: {
+    key: string;
+    value: TextVersion;
+    indexes: { 'by-source': string };
+  };
 }
 
 let dbInstance: IDBPDatabase<WriterDB> | null = null;
@@ -108,9 +138,9 @@ let dbInstance: IDBPDatabase<WriterDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<WriterDB>('writer-db', 5, {
+  dbInstance = await openDB<WriterDB>('writer-db', 7, {
     upgrade(db, oldVersion) {
-      console.log(`[DB] Upgrading from v${oldVersion} to v5`);
+      console.log(`[DB] Upgrading from v${oldVersion} to v7`);
       if (oldVersion < 1) {
         // Books store
         const bookStore = db.createObjectStore('books', { keyPath: 'id' });
@@ -141,6 +171,16 @@ export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
         const wbfStore = db.createObjectStore('wbFeedbacks', { keyPath: 'id' });
         wbfStore.createIndex('by-entry', 'wbEntryId');
       }
+      if (oldVersion < 6) {
+        // Chat sessions store
+        const chatStore = db.createObjectStore('chatSessions', { keyPath: 'id' });
+        chatStore.createIndex('by-context', 'contextType');
+      }
+      if (oldVersion < 7) {
+        // Text versions store (git-like snapshots)
+        const versionStore = db.createObjectStore('textVersions', { keyPath: 'id' });
+        versionStore.createIndex('by-source', 'sourceId');
+      }
     },
     blocked() {
       console.warn('[DB] Upgrade blocked — close other tabs using this app and refresh.');
@@ -159,7 +199,7 @@ export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
     },
   });
 
-  console.log('[DB] Opened successfully at v5');
+  console.log('[DB] Opened successfully at v7');
 
   return dbInstance;
 }
@@ -199,9 +239,18 @@ export async function updateBook(id: string, updates: Partial<Pick<Book, 'title'
 
 export async function deleteBook(id: string): Promise<void> {
   const db = await getDB();
-  // Delete all chapters of this book
+  // Delete all chapters of this book + their critiques, chat sessions, text versions
   const chapters = await getChaptersByBook(id);
   for (const chapter of chapters) {
+    await deleteCritiquesByChapter(chapter.id);
+    await deleteTextVersionsBySource(chapter.id);
+    // Delete chat sessions related to this chapter
+    const allSessions = await db.getAll('chatSessions');
+    for (const s of allSessions) {
+      if (s.id.startsWith(`chapter-${chapter.id}`)) {
+        await db.delete('chatSessions', s.id);
+      }
+    }
     await db.delete('chapters', chapter.id);
   }
   // Delete all world building entries of this book
@@ -421,6 +470,63 @@ export async function deleteWBFeedbacksByEntry(wbEntryId: string): Promise<void>
 }
 
 // ==========================================
+// CHAT SESSIONS
+// ==========================================
+
+export async function getChatSession(id: string): Promise<ChatSession | undefined> {
+  const db = await getDB();
+  return db.get('chatSessions', id);
+}
+
+export async function saveChatSession(session: ChatSession): Promise<void> {
+  const db = await getDB();
+  await db.put('chatSessions', { ...session, updatedAt: new Date() });
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('chatSessions', id);
+}
+
+// ==========================================
+// TEXT VERSIONS (git-like snapshots)
+// ==========================================
+
+export async function saveTextVersion(sourceId: string, sourceType: 'chapter' | 'world_building', title: string, content: string, label: string): Promise<TextVersion> {
+  const db = await getDB();
+  const version: TextVersion = {
+    id: crypto.randomUUID(),
+    sourceId,
+    sourceType,
+    title,
+    content,
+    label,
+    createdAt: new Date(),
+  };
+  await db.put('textVersions', version);
+  return version;
+}
+
+export async function getTextVersions(sourceId: string): Promise<TextVersion[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('textVersions', 'by-source', sourceId);
+  return all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function deleteTextVersion(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('textVersions', id);
+}
+
+export async function deleteTextVersionsBySource(sourceId: string): Promise<void> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('textVersions', 'by-source', sourceId);
+  for (const v of all) {
+    await db.delete('textVersions', v.id);
+  }
+}
+
+// ==========================================
 // EXPORT / IMPORT
 // ==========================================
 
@@ -432,27 +538,33 @@ export interface WriterExport {
   critiques: CritiqueEntry[];
   worldBuilding: WorldBuildingEntry[];
   wbFeedbacks: WBFeedbackEntry[];
+  chatSessions: ChatSession[];
+  textVersions: TextVersion[];
   settings: { key: string; value: string }[];
 }
 
 export async function exportDatabase(): Promise<WriterExport> {
   const db = await getDB();
-  const [books, chapters, critiques, worldBuilding, wbFeedbacks, settings] = await Promise.all([
+  const [books, chapters, critiques, worldBuilding, wbFeedbacks, chatSessions, textVersions, settings] = await Promise.all([
     db.getAll('books'),
     db.getAll('chapters'),
     db.getAll('critiques'),
     db.getAll('worldBuilding'),
     db.getAll('wbFeedbacks'),
+    db.getAll('chatSessions'),
+    db.getAll('textVersions'),
     db.getAll('settings'),
   ]);
   return {
-    version: 5,
+    version: 7,
     exportedAt: new Date().toISOString(),
     books,
     chapters,
     critiques,
     worldBuilding,
     wbFeedbacks,
+    chatSessions,
+    textVersions,
     settings,
   };
 }
@@ -477,19 +589,21 @@ export async function importDatabase(data: WriterExport): Promise<{ books: numbe
   const db = await getDB();
 
   // Clear existing data
-  const tx = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'wbFeedbacks', 'settings'], 'readwrite');
+  const tx = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'wbFeedbacks', 'chatSessions', 'textVersions', 'settings'], 'readwrite');
   await Promise.all([
     tx.objectStore('books').clear(),
     tx.objectStore('chapters').clear(),
     tx.objectStore('critiques').clear(),
     tx.objectStore('worldBuilding').clear(),
     tx.objectStore('wbFeedbacks').clear(),
+    tx.objectStore('chatSessions').clear(),
+    tx.objectStore('textVersions').clear(),
     tx.objectStore('settings').clear(),
   ]);
   await tx.done;
 
   // Import all records
-  const txImport = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'wbFeedbacks', 'settings'], 'readwrite');
+  const txImport = db.transaction(['books', 'chapters', 'critiques', 'worldBuilding', 'wbFeedbacks', 'chatSessions', 'textVersions', 'settings'], 'readwrite');
   for (const book of data.books) {
     await txImport.objectStore('books').put(book);
   }
@@ -504,6 +618,12 @@ export async function importDatabase(data: WriterExport): Promise<{ books: numbe
   }
   for (const wbf of (data.wbFeedbacks || [])) {
     await txImport.objectStore('wbFeedbacks').put(wbf);
+  }
+  for (const cs of (data.chatSessions || [])) {
+    await txImport.objectStore('chatSessions').put(cs);
+  }
+  for (const tv of (data.textVersions || [])) {
+    await txImport.objectStore('textVersions').put(tv);
   }
   for (const setting of (data.settings || [])) {
     await txImport.objectStore('settings').put(setting);

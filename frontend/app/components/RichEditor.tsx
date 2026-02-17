@@ -6,6 +6,7 @@ import Underline from '@tiptap/extension-underline';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { FontSize } from '@tiptap/extension-text-style';
 import Placeholder from '@tiptap/extension-placeholder';
+import Highlight from '@tiptap/extension-highlight';
 import { useEffect, useRef, useCallback } from 'react';
 
 interface RichEditorProps {
@@ -32,6 +33,7 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
       Underline,
       TextStyle,
       FontSize,
+      Highlight.configure({ multicolor: true }),
       Placeholder.configure({
         placeholder: placeholder || 'Commencez à écrire…',
       }),
