@@ -1,11 +1,14 @@
 # Use a Python base image
-FROM python:3.10-slim-buster
+FROM python:3.10-slim-bookworm
 
 # Set the working directory in the container
 WORKDIR /app
 
 # Copy the whole project root into /app
 COPY . .
+
+# Install LibreOffice for ODT→DOCX conversion (headless, minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer && rm -rf /var/lib/apt/lists/*
 
 # Install the Python dependencies (from backend/requirements.txt)
 RUN pip install --no-cache-dir -r backend/requirements.txt

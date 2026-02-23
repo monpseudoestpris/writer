@@ -166,3 +166,23 @@ async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, 
     ):
         if chunk.data.choices[0].delta.content:
             yield chunk.data.choices[0].delta.content
+
+
+async def get_structured_comments(text: str, system_prompt: str) -> str:
+    """Appel non-streaming à mistral-large pour obtenir des commentaires JSON structurés."""
+    client = get_mistral_client()
+    user_content = (
+        "[DÉBUT DU DOCUMENT]\n"
+        f"{text}\n"
+        "[FIN DU DOCUMENT]\n\n"
+        "Analyse ce document et produis tes commentaires au format JSON demandé."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    response = await client.chat.complete_async(
+        model="mistral-large-latest",
+        messages=messages
+    )
+    return response.choices[0].message.content

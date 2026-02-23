@@ -490,6 +490,20 @@ export default function Home() {
   const [rewriteResult, setRewriteResult] = useState('');
   const [rewriteInstructions, setRewriteInstructions] = useState('');
 
+  // Rapport annoté (review-document)
+  const [reportReviewer, setReportReviewer] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('report_reviewer')) || 'prof_ecriture');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportDocName, setReportDocName] = useState('');
+  const [reportContext, setReportContext] = useState('');
+  const [showReportDone, setShowReportDone] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportFile, setReportFile] = useState<File | null>(null);
+  const [reportAuthor, setReportAuthor] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('report_author')) || '');
+  const [reportPurpose, setReportPurpose] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('report_purpose')) || '');
+  const [reportAudience, setReportAudience] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('report_audience')) || '');
+  const [reportStage, setReportStage] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('report_stage')) || 'premier_jet');
+  const [reportDocType, setReportDocType] = useState(() => (typeof window !== 'undefined' && localStorage.getItem('report_doc_type')) || 'autre');
+
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -672,6 +686,91 @@ export default function Home() {
     } catch (err) {
       alert("Erreur lors de l'import : " + (err as Error).message);
     }
+  };
+
+  const handleReviewDocument = async () => {
+    if (!reportFile) return;
+    setReportLoading(true);
+    setReportDocName(reportFile.name);
+
+    // Construire le contexte à partir des champs
+    const stageLabels: Record<string, string> = {
+      'plan': 'Plan / structure uniquement',
+      'plan_idees': 'Plan avec quelques idées développées',
+      'premier_jet': 'Premier jet',
+      'version_finale': 'Version finale',
+      'version_trous': 'Version avec des trous ou parties à reformuler',
+    };
+    const docTypeLabels: Record<string, string> = {
+      'rapport': 'Rapport', 'roman': 'Roman / Nouvelle', 'scenario': 'Scénario (JDR, film, etc.)',
+      'memoire': 'Mémoire / Thèse', 'article': 'Article / Blog', 'lettre': 'Lettre / Courrier',
+      'proposition': 'Proposition commerciale', 'essai': 'Essai', 'poesie': 'Poésie',
+      'autre': 'Autre',
+    };
+    const contextParts: string[] = [];
+    if (reportAuthor.trim()) contextParts.push(`Auteur : ${reportAuthor.trim()}`);
+    contextParts.push(`Type de document : ${docTypeLabels[reportDocType] || reportDocType}`);
+    contextParts.push(`État d'avancement : ${stageLabels[reportStage] || reportStage}`);
+    if (reportPurpose.trim()) contextParts.push(`Objectif / description : ${reportPurpose.trim()}`);
+    if (reportAudience.trim()) contextParts.push(`Destinataires : ${reportAudience.trim()}`);
+    const fullContext = contextParts.join('\n');
+
+    // Sauvegarder les champs du formulaire pour la prochaine fois
+    localStorage.setItem('report_author', reportAuthor);
+    localStorage.setItem('report_purpose', reportPurpose);
+    localStorage.setItem('report_audience', reportAudience);
+    localStorage.setItem('report_reviewer', reportReviewer);
+    localStorage.setItem('report_stage', reportStage);
+    localStorage.setItem('report_doc_type', reportDocType);
+
+    const formData = new FormData();
+    formData.append('file', reportFile);
+    formData.append('reviewer', reportReviewer);
+    if (fullContext) {
+      formData.append('context', fullContext);
+    }
+
+    try {
+      const res = await fetch('http://localhost:8000/review-document', {
+        method: 'POST',
+        body: formData,
+      });
+
+      // Vérifier si c'est une erreur JSON
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const err = await res.json();
+        alert(err.error || 'Erreur');
+        setReportLoading(false);
+        return;
+      }
+
+      if (!res.ok) {
+        alert('Erreur lors de la génération du document commenté');
+        setReportLoading(false);
+        return;
+      }
+
+      // Télécharger le .docx
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const baseName = reportFile.name.replace(/\.[^.]+$/, '');
+      a.download = `commente-${baseName}.docx`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+      setShowReportModal(false);
+      setShowReportDone(true);
+    } catch (err) {
+      alert("Erreur : " + (err as Error).message);
+    }
+    setReportLoading(false);
   };
 
   const handleDeleteBook = async (bookId: string) => {
@@ -1515,6 +1614,23 @@ export default function Home() {
                 }}
               />
             </label>
+          </div>
+
+          {/* Commenter un document */}
+          <div className="px-3 pb-3">
+            <button
+              onClick={() => {
+                setReportFile(null);
+                setShowReportModal(true);
+              }}
+              className="w-full px-3 py-2.5 rounded-xl border-2 border-[var(--accent)]/25 bg-gradient-to-r from-[var(--accent)]/8 to-transparent hover:from-[var(--accent)]/15 transition-all flex items-center gap-2.5 group"
+            >
+              <span className="text-lg">📋</span>
+              <div className="text-left">
+                <div className="text-[var(--accent)] text-xs font-semibold">Commenter un document</div>
+                <div className="text-[var(--text-muted)] text-[10px]">Importer un .docx/.odt → commenté</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -2367,6 +2483,181 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Modal formulaire commenter un document */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => { if (!reportLoading) setShowReportModal(false); }}>
+          <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl w-[32rem] max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📋</span>
+                <h3 className="text-[var(--text-primary)] font-semibold text-base">Commenter un document</h3>
+              </div>
+              <button onClick={() => { if (!reportLoading) setShowReportModal(false); }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              {/* Fichier */}
+              <div>
+                <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">Document à commenter</label>
+                <label className={`w-full px-3 py-3 rounded-lg border-2 border-dashed transition-all flex items-center justify-center gap-2 text-sm cursor-pointer ${reportFile ? 'border-[var(--accent)]/40 bg-[var(--accent)]/5 text-[var(--accent)]' : 'border-[var(--border-medium)] text-[var(--text-muted)] hover:border-[var(--accent)]/30 hover:bg-[var(--accent)]/5'}`}>
+                  {reportFile ? (
+                    <><span>📄</span> {reportFile.name}</>
+                  ) : (
+                    <><span>📂</span> Choisir un fichier .docx, .doc ou .odt</>
+                  )}
+                  <input
+                    type="file"
+                    accept=".docx,.doc,.odt"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) setReportFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+
+              {/* Type de document + État d'avancement (côte à côte) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">Type de document</label>
+                  <select
+                    className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border-subtle)] bg-[#1e1e2e] text-white"
+                    style={{ colorScheme: 'dark' }}
+                    value={reportDocType}
+                    onChange={(e) => setReportDocType(e.target.value)}
+                  >
+                    <option value="rapport" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>📊 Rapport</option>
+                    <option value="roman" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>📖 Roman / Nouvelle</option>
+                    <option value="scenario" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>🎬 Scénario (JDR, film…)</option>
+                    <option value="memoire" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>🎓 Mémoire / Thèse</option>
+                    <option value="article" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>📰 Article / Blog</option>
+                    <option value="lettre" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>✉️ Lettre / Courrier</option>
+                    <option value="proposition" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>💼 Proposition commerciale</option>
+                    <option value="essai" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>📝 Essai</option>
+                    <option value="poesie" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>🪶 Poésie</option>
+                    <option value="autre" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>📄 Autre</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">État d'avancement</label>
+                  <select
+                    className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border-subtle)] bg-[#1e1e2e] text-white"
+                    style={{ colorScheme: 'dark' }}
+                    value={reportStage}
+                    onChange={(e) => setReportStage(e.target.value)}
+                  >
+                    <option value="plan" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>🗂️ Plan / structure</option>
+                    <option value="plan_idees" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>💡 Plan + quelques idées</option>
+                    <option value="premier_jet" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>✍️ Premier jet</option>
+                    <option value="version_finale" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>✅ Version finale</option>
+                    <option value="version_trous" style={{ backgroundColor: '#1e1e2e', color: '#fff' }}>🕳️ Version avec des trous</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Qui a écrit */}
+              <div>
+                <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">Qui a écrit ce document ?</label>
+                <input
+                  type="text"
+                  className="input-writer w-full px-3 py-2 rounded-lg text-[var(--text-primary)] text-sm"
+                  placeholder="Ex : moi, un collègue, un étudiant…"
+                  value={reportAuthor}
+                  onChange={(e) => setReportAuthor(e.target.value)}
+                />
+              </div>
+
+              {/* C'est quoi */}
+              <div>
+                <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">Description / objectif du document</label>
+                <textarea
+                  className="input-writer w-full px-3 py-2 rounded-lg text-[var(--text-primary)] text-sm resize-none"
+                  rows={2}
+                  placeholder="Ex : un scénario de JDR Star Wars pour débutants, un rapport de stage en informatique…"
+                  value={reportPurpose}
+                  onChange={(e) => setReportPurpose(e.target.value)}
+                />
+              </div>
+
+              {/* Pour qui */}
+              <div>
+                <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">À qui est-il destiné ?</label>
+                <input
+                  type="text"
+                  className="input-writer w-full px-3 py-2 rounded-lg text-[var(--text-primary)] text-sm"
+                  placeholder="Ex : un client, un jury, des joueurs, le grand public…"
+                  value={reportAudience}
+                  onChange={(e) => setReportAudience(e.target.value)}
+                />
+              </div>
+
+              {/* Reviewer */}
+              <div>
+                <label className="text-[var(--text-secondary)] text-xs font-medium mb-1.5 block">Qui doit le relire ?</label>
+                <select
+                  className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border-subtle)] bg-[#1e1e2e] text-white"
+                  style={{ colorScheme: 'dark' }}
+                  value={reportReviewer}
+                  onChange={(e) => setReportReviewer(e.target.value)}
+                >
+                  {reviewers.map(r => (
+                    <option key={r.id} value={r.id} style={{ backgroundColor: '#1e1e2e', color: '#ffffff' }}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowReportModal(false)}
+                disabled={reportLoading}
+                className="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-sm rounded-lg transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => handleReviewDocument()}
+                disabled={!reportFile || reportLoading}
+                className={`px-5 py-2 text-sm font-medium rounded-xl transition-all flex items-center gap-2 ${!reportFile || reportLoading ? 'bg-[var(--accent)]/10 text-[var(--accent)]/40 cursor-not-allowed' : 'bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 text-[var(--accent)]'}`}
+              >
+                {reportLoading ? (
+                  <>
+                    <span className="inline-block w-3.5 h-3.5 border-2 border-[var(--accent)]/40 border-t-[var(--accent)] rounded-full animate-spin" />
+                    Analyse en cours…
+                  </>
+                ) : (
+                  <>📋 Lancer l'analyse</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmation rapport téléchargé */}
+      {showReportDone && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowReportDone(false)}>
+          <div className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl p-8 max-w-md text-center" onClick={e => e.stopPropagation()}>
+            <div className="text-4xl mb-4">✅</div>
+            <h3 className="text-[var(--text-primary)] font-semibold text-lg mb-2">Document commenté prêt !</h3>
+            <p className="text-[var(--text-secondary)] text-sm mb-1">
+              Le fichier <span className="font-medium text-[var(--accent)]">commente-{reportDocName.replace(/\.[^.]+$/, '')}.docx</span> a été téléchargé.
+            </p>
+            <p className="text-[var(--text-muted)] text-xs mb-5">
+              Ouvrez-le dans Word ou LibreOffice pour consulter les commentaires.
+            </p>
+            <button
+              onClick={() => setShowReportDone(false)}
+              className="px-6 py-2 bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 text-[var(--accent)] text-sm font-medium rounded-xl transition-all"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

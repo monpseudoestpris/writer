@@ -6,3 +6,4 @@ mistralai
 python-multipart
 python-docx
 odfpy
+lxml

@@ -1,11 +1,11 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
 from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest
-from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages
-from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB
+from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages, get_structured_comments
+from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 
 load_dotenv()
 
@@ -685,6 +685,155 @@ async def import_document(file: UploadFile = File(...)):
         result["title"] = filename.rsplit(".", 1)[0]
 
     return result
+
+
+@app.post("/review-document")
+async def review_document(file: UploadFile = File(...), reviewer: str = Form("prof_ecriture"), context: str = Form("")):
+    """Importe un document et produit un .docx commenté avec des annotations Word."""
+    from backend.document_import import extract_structured_text
+    from backend.docx_comments import build_commented_docx
+    import json as json_module
+    import traceback
+
+    if reviewer not in REVIEWER_PROMPTS:
+        return {"error": "Reviewer inconnu"}
+
+    filename = file.filename or "document"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ("docx", "doc", "odt"):
+        return {"error": "Format non supporté. Utilisez .docx ou .odt"}
+
+    file_bytes = await file.read()
+    print(f"[review-document] Fichier: {filename}, ext: {ext}, taille: {len(file_bytes)} octets")
+
+    try:
+        result = extract_structured_text(file_bytes, ext)
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": f"Erreur de lecture du document : {e}"}
+
+    doc_title = result.get("title") or filename.rsplit(".", 1)[0]
+    sections = result.get("sections", [])
+    print(f"[review-document] Titre: {doc_title}, sections: {len(sections)}")
+
+    if not sections:
+        return {"error": "Aucun contenu trouvé dans le document"}
+
+    # Construire le texte pour l'IA
+    doc_text_parts = [f"TITRE DU DOCUMENT : {doc_title}\n"]
+    for sec in sections:
+        heading = sec["heading"]
+        level = sec.get("level", 1)
+        hashes = "#" * min(level, 4)
+        doc_text_parts.append(f"\n{hashes} {heading}\n")
+        for para in sec["paragraphs"]:
+            doc_text_parts.append(para)
+
+    doc_text = "\n".join(doc_text_parts)
+    print(f"[review-document] Texte pour IA: {len(doc_text)} caractères")
+
+    # Construire le prompt système pour obtenir du JSON
+    reviewer_prompt = REVIEWER_PROMPTS[reviewer]
+    reviewer_name = REVIEWER_FIRST_NAMES.get(reviewer, "Le Critique")
+    system_prompt = (
+        REVIEW_DOCUMENT_JSON_PROMPT
+        + f"\n\nTA PERSONA :\n{reviewer_prompt}\n"
+    )
+    if context:
+        system_prompt += f"\nCONTEXTE FOURNI PAR L'AUTEUR (ce qu'est ce document, à qui il s'adresse, ce qu'il en attend) :\n{context}\n"
+
+    # Appel non-streaming pour obtenir le JSON des commentaires
+    print(f"[review-document] Appel IA en cours...")
+    try:
+        raw_response = await get_structured_comments(doc_text, system_prompt)
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": f"Erreur lors de l'analyse IA : {e}"}
+
+    print(f"[review-document] Réponse IA reçue: {len(raw_response)} caractères")
+
+    # Parser le JSON
+    try:
+        # Nettoyer la réponse (enlever markdown fences si présents)
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            first_newline = cleaned.find("\n")
+            if first_newline != -1:
+                cleaned = cleaned[first_newline + 1:]
+            else:
+                cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        def fix_json_newlines(s: str) -> str:
+            """Parcourt le JSON caractère par caractère et remplace les vrais
+            sauts de ligne et caractères de contrôle à l'intérieur des chaînes."""
+            result = []
+            in_string = False
+            escape = False
+            for ch in s:
+                if escape:
+                    result.append(ch)
+                    escape = False
+                    continue
+                if ch == '\\' and in_string:
+                    result.append(ch)
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    result.append(ch)
+                    continue
+                if in_string and ord(ch) < 32:
+                    # Remplacer tous les caractères de contrôle (newline, tab, etc.) par un espace
+                    if ch not in ('\n', '\r', '\t'):
+                        continue  # supprimer les autres caractères de contrôle
+                    result.append(' ')
+                    continue
+                result.append(ch)
+            return ''.join(result)
+
+        # Tenter de parser tel quel, sinon réparer les newlines
+        try:
+            comments = json_module.loads(cleaned)
+        except json_module.JSONDecodeError:
+            fixed = fix_json_newlines(cleaned)
+            comments = json_module.loads(fixed)
+
+        if not isinstance(comments, list):
+            comments = [comments]
+    except json_module.JSONDecodeError as e:
+        print(f"[review-document] ERREUR JSON: {e}")
+        print(f"[review-document] Réponse brute: {raw_response[:500]}")
+        return {"error": f"Erreur de parsing JSON de l'IA : {e}\nRéponse brute : {raw_response[:500]}"}
+
+    print(f"[review-document] {len(comments)} commentaires parsés, construction du .docx...")
+
+    # Construire le .docx commenté
+    try:
+        docx_bytes = build_commented_docx(
+            original_bytes=file_bytes,
+            comments=comments,
+            author=reviewer_name,
+            ext=ext,
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": f"Erreur lors de la construction du document commenté : {e}"}
+
+    print(f"[review-document] .docx généré: {len(docx_bytes)} octets")
+
+    # Retourner le .docx
+    output_name = f"commenté-{filename.rsplit('.', 1)[0]}.docx"
+    from fastapi.responses import Response
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f'attachment; filename="{output_name}"',
+        },
+    )
 
 
 @app.post("/import-document/debug")

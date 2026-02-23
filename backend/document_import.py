@@ -330,3 +330,144 @@ def _split_by_headings(elements: list[dict], title: Optional[str]) -> dict:
         })
 
     return {"title": title, "chapters": chapters}
+
+
+def extract_structured_text(file_bytes: bytes, ext: str) -> dict:
+    """
+    Extrait le texte structuré d'un document pour envoi à l'IA.
+    Retourne {title, sections: [{heading, level, paragraphs: [str]}]}
+    """
+    if ext in ("docx", "doc"):
+        result = parse_docx(file_bytes)
+    else:
+        result = parse_odt(file_bytes)
+
+    # Reconstruire un format structuré section-par-section pour l'IA
+    # On re-parse les éléments bruts
+    if ext in ("docx", "doc"):
+        elements = _extract_elements_docx(file_bytes)
+    else:
+        elements = _extract_elements_odt(file_bytes)
+
+    title = result.get("title")
+    sections = _build_sections(elements)
+    return {"title": title, "sections": sections}
+
+
+def _extract_elements_docx(file_bytes: bytes) -> list[dict]:
+    """Extrait les éléments bruts d'un docx."""
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(io.BytesIO(file_bytes))
+    elements = []
+    body = doc.element.body
+
+    for child in body:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "p":
+            try:
+                para = Paragraph(child, doc.element.body)
+            except Exception:
+                continue
+            style_name = para.style.name if para.style else ""
+            heading_level = _detect_heading_level_docx(para, style_name)
+            plain_text = para.text.strip()
+            if plain_text:
+                elements.append({
+                    "heading_level": heading_level,
+                    "text": plain_text,
+                })
+
+    return elements
+
+
+def _extract_elements_odt(file_bytes: bytes) -> list[dict]:
+    """Extrait les éléments bruts d'un odt."""
+    from odf.opendocument import load as odf_load
+    from odf import teletype
+    from odf.namespaces import TEXTNS
+
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".odt")
+        os.write(fd, file_bytes)
+        os.close(fd)
+        doc = odf_load(tmp_path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    TEXT_H = (TEXTNS, "h")
+    TEXT_P = (TEXTNS, "p")
+    elements = []
+    in_list_depth = 0
+
+    def _walk(node):
+        nonlocal in_list_depth
+        for child in node.childNodes:
+            qname = getattr(child, "qname", None)
+            if qname is None:
+                continue
+            if qname == TEXT_H:
+                text_content = teletype.extractText(child).strip()
+                outline_level_str = child.getAttrNS(TEXTNS, "outline-level") or "1"
+                try:
+                    level = int(outline_level_str)
+                except ValueError:
+                    level = 1
+                if text_content:
+                    elements.append({"heading_level": level, "text": text_content})
+            elif qname == TEXT_P:
+                text_content = teletype.extractText(child).strip()
+                if text_content:
+                    prefix = "• " if in_list_depth > 0 else ""
+                    elements.append({"heading_level": None, "text": prefix + text_content})
+            else:
+                is_list = (qname == (TEXTNS, "list"))
+                if is_list:
+                    in_list_depth += 1
+                if hasattr(child, "childNodes") and len(child.childNodes) > 0:
+                    _walk(child)
+                if is_list:
+                    in_list_depth -= 1
+
+    _walk(doc.text)
+    return elements
+
+
+def _build_sections(elements: list[dict]) -> list[dict]:
+    """Regroupe les éléments en sections pour le rapport annoté."""
+    if not elements:
+        return []
+
+    sections = []
+    current_heading = None
+    current_level = None
+    current_paragraphs = []
+
+    for elem in elements:
+        if elem["heading_level"] is not None:
+            # Sauvegarder la section précédente
+            if current_heading is not None or current_paragraphs:
+                sections.append({
+                    "heading": current_heading or "(Introduction)",
+                    "level": current_level or 0,
+                    "paragraphs": current_paragraphs,
+                })
+            current_heading = elem["text"]
+            current_level = elem["heading_level"]
+            current_paragraphs = []
+        else:
+            current_paragraphs.append(elem["text"])
+
+    # Dernière section
+    if current_heading is not None or current_paragraphs:
+        sections.append({
+            "heading": current_heading or "(Introduction)",
+            "level": current_level or 0,
+            "paragraphs": current_paragraphs,
+        })
+
+    return sections
