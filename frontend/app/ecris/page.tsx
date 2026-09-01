@@ -1436,8 +1436,8 @@ export default function Home() {
         <div className="w-[17rem] h-full flex flex-col">
           {/* Logo */}
           <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-            <h1 className="text-[var(--accent)] font-semibold text-sm tracking-widest uppercase">✍️ J&apos;écris</h1>
-            <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent)] text-xs transition-colors" title="Retour à l'accueil">
+            <h1 className="font-display gradient-text font-bold text-base tracking-tight">✍️ J&apos;écris</h1>
+            <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
               ← Accueil
             </Link>
           </div>

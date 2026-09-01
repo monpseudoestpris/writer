@@ -3,11 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
-from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, ClassroomExerciseRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest
+import re
+from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest
 from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages, get_structured_comments, generate_text_from_mistral
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 from backend.students import STUDENTS, STUDENT_IDS, TEACHER_NAME, TEACHER_PROMPT, get_students_list
-from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, SYNTHESIS_PROMPT
+from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
 
 load_dotenv()
 
@@ -896,13 +897,13 @@ def _build_student_record(past_syntheses: list[dict] | None) -> str:
 
 @app.post("/classroom/exercise")
 async def classroom_exercise(request: ClassroomExerciseRequest):
-    """Le professeur génère un nouvel exercice d'écriture pour l'élève."""
+    """Le professeur propose 3 exercices d'écriture différents, parmi lesquels l'élève choisit."""
     avoid_repeats = ""
     if request.previous_exercise_titles:
         titles = "\n".join(f"- {t}" for t in request.previous_exercise_titles[-15:])
         avoid_repeats = (
             "L'élève a déjà fait les exercices suivants récemment, PROPOSE QUELQUE CHOSE DE DIFFÉRENT "
-            f"(autre thème, autre type d'exercice) :\n{titles}"
+            f"(autre thème, autre type d'exercice, autre genre) :\n{titles}"
         )
     student_record = _build_student_record(request.past_syntheses)
     system_prompt = EXERCISE_GENERATION_PROMPT.format(
@@ -912,10 +913,28 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
         student_record=student_record,
     )
     try:
-        exercise = await generate_text_from_mistral(system_prompt, "Donne-moi un nouvel exercice pour la classe.")
+        raw = await generate_text_from_mistral(system_prompt, "Propose-moi 3 exercices au choix pour la classe.")
     except Exception as e:
         return {"error": str(e)}
-    return {"exercise": exercise}
+    parts = re.split(r"=+\s*EXERCICE_SUIVANT\s*=+", raw)
+    exercises = [p.strip() for p in parts if p.strip()]
+    if not exercises:
+        exercises = [raw.strip()]
+    return {"exercises": exercises}
+
+
+@app.post("/classroom/lesson")
+async def classroom_lesson(request: ClassroomLessonRequest):
+    """Le professeur donne un petit cours (bases + exemples) pour préparer l'élève à un exercice précis."""
+    system_prompt = LESSON_PROMPT.format(
+        teacher_name=TEACHER_NAME,
+        teacher_personality=TEACHER_PROMPT,
+        exercise_prompt=request.exercise_prompt,
+    )
+    return StreamingResponse(
+        stream_from_mistral_small(system_prompt, "Donne-moi le cours pour me préparer à cet exercice."),
+        media_type="text/plain"
+    )
 
 
 @app.post("/classroom/peer-review")
@@ -963,15 +982,17 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
 @app.post("/classroom/teacher-critique")
 async def classroom_teacher_critique(request: ClassroomTeacherRequest):
     """Le professeur critique le travail de l'élève (bilan final ou aide à la demande)."""
+    revision_note = TEACHER_REVISION_NOTE if request.text_changed_since_peer_review else ""
     if request.on_demand:
         peer_context = (
             f"Voici ce que les camarades ont déjà dit, si cela peut t'éclairer :\n{request.peer_comments}\n\n"
             if request.peer_comments else ""
         )
-        mode_instructions = TEACHER_MODE_ON_DEMAND.format(peer_context=peer_context)
+        mode_instructions = TEACHER_MODE_ON_DEMAND.format(peer_context=peer_context, revision_note=revision_note)
     else:
         mode_instructions = TEACHER_MODE_FINAL.format(
-            peer_comments=request.peer_comments or "(l'élève n'a pas sollicité l'avis de ses camarades)"
+            peer_comments=request.peer_comments or "(l'élève n'a pas sollicité l'avis de ses camarades)",
+            revision_note=revision_note,
         )
 
     student_record = _build_student_record(request.past_syntheses)

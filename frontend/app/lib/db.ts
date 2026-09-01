@@ -77,7 +77,9 @@ export interface ClassroomExercise {
   promptMarkdown: string;  // full exercise statement from the teacher
   content: string;         // student's current HTML content
   peerComments: string;    // latest peer review markdown ('' if none yet)
+  peerReviewTextSnapshot: string; // plain text submitted for peer review, to detect later edits ('' if none yet)
   teacherCritique: string; // latest teacher critique markdown ('' if none yet)
+  lesson: string;          // tailored "le cours" markdown for this exercise ('' if not generated yet)
   synthesis: string;       // +/- synthesis added to the student's progress record once completed ('' if none yet)
   status: 'draft' | 'reviewed' | 'completed';
   createdAt: Date;
@@ -351,6 +353,18 @@ export async function saveFavoritePanel(reviewerIds: string[]): Promise<void> {
   await db.put('settings', { key: 'favoritePanel', value: JSON.stringify(reviewerIds) });
 }
 
+// Last active classroom exercise, so "J'apprends" resumes exactly where the student left off
+export async function getLastClassroomExerciseId(): Promise<string | null> {
+  const db = await getDB();
+  const entry = await db.get('settings', 'lastClassroomExerciseId');
+  return entry?.value ?? null;
+}
+
+export async function saveLastClassroomExerciseId(id: string): Promise<void> {
+  const db = await getDB();
+  await db.put('settings', { key: 'lastClassroomExerciseId', value: id });
+}
+
 // Critiques
 export async function saveCritique(chapterId: string, reviewer: string, critique: string, textSnapshot: string): Promise<CritiqueEntry> {
   const db = await getDB();
@@ -559,7 +573,9 @@ export async function createClassroomExercise(title: string, promptMarkdown: str
     promptMarkdown,
     content: '',
     peerComments: '',
+    peerReviewTextSnapshot: '',
     teacherCritique: '',
+    lesson: '',
     synthesis: '',
     status: 'draft',
     createdAt: new Date(),
@@ -573,7 +589,7 @@ export async function getClassroomExercises(): Promise<ClassroomExercise[]> {
   const db = await getDB();
   const all = await db.getAll('classroomExercises');
   return all
-    .map(e => ({ ...e, synthesis: e.synthesis ?? '' }))
+    .map(e => ({ ...e, synthesis: e.synthesis ?? '', peerReviewTextSnapshot: e.peerReviewTextSnapshot ?? '', lesson: e.lesson ?? '' }))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
@@ -584,7 +600,7 @@ export async function getClassroomExercise(id: string): Promise<ClassroomExercis
 
 export async function updateClassroomExercise(
   id: string,
-  updates: Partial<Pick<ClassroomExercise, 'content' | 'peerComments' | 'teacherCritique' | 'synthesis' | 'status'>>
+  updates: Partial<Pick<ClassroomExercise, 'content' | 'peerComments' | 'peerReviewTextSnapshot' | 'teacherCritique' | 'lesson' | 'synthesis' | 'status'>>
 ): Promise<void> {
   const db = await getDB();
   const exercise = await db.get('classroomExercises', id);

@@ -8,6 +8,8 @@ import {
   createClassroomExercise,
   updateClassroomExercise,
   deleteClassroomExercise,
+  getLastClassroomExerciseId,
+  saveLastClassroomExerciseId,
 } from '../lib/db';
 import RichEditor, { EditorToolbar } from '../components/RichEditor';
 import type { Editor } from '@tiptap/react';
@@ -105,6 +107,11 @@ function extractTitle(markdown: string): string {
   return match ? match[1].trim() : 'Exercice';
 }
 
+function extractField(markdown: string, label: string): string | null {
+  const match = markdown.match(new RegExp(`\\*\\*${label}\\s*:\\*\\*\\s*(.+)`, 'i'));
+  return match ? match[1].trim() : null;
+}
+
 export default function ApprendsPage() {
   const [exercises, setExercises] = useState<ClassroomExercise[]>([]);
   const [selected, setSelected] = useState<ClassroomExercise | null>(null);
@@ -119,12 +126,23 @@ export default function ApprendsPage() {
   const [isLoadingTeacher, setIsLoadingTeacher] = useState(false);
   const [showRecord, setShowRecord] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exerciseProposals, setExerciseProposals] = useState<string[]>([]);
+  const [openLessonIndex, setOpenLessonIndex] = useState<number | null>(null);
+  const [lessonTexts, setLessonTexts] = useState<Record<number, string>>({});
+  const [loadingLessonIndex, setLoadingLessonIndex] = useState<number | null>(null);
+  const [showLesson, setShowLesson] = useState(false);
+  const [isLoadingSelectedLesson, setIsLoadingSelectedLesson] = useState(false);
 
   useEffect(() => {
     (async () => {
       const list = await getClassroomExercises();
       setExercises(list);
-      if (list.length > 0) selectExercise(list[0]);
+      if (list.length > 0) {
+        // Resume the exercise the student was last working on, not just the newest one
+        const lastId = await getLastClassroomExerciseId();
+        const toResume = (lastId && list.find(e => e.id === lastId)) || list[0];
+        selectExercise(toResume);
+      }
     })();
 
     fetch(`${API_URL}/classroom/students`)
@@ -140,6 +158,8 @@ export default function ApprendsPage() {
     setSelected(ex);
     setContent(ex.content || '');
     setError(null);
+    setShowLesson(false);
+    saveLastClassroomExerciseId(ex.id).catch(() => {});
   };
 
   // The teacher's progress record: synthesis of +/- from every exercise finished so far
@@ -151,6 +171,9 @@ export default function ApprendsPage() {
   const handleNewExercise = async () => {
     setIsGeneratingExercise(true);
     setError(null);
+    setExerciseProposals([]);
+    setOpenLessonIndex(null);
+    setLessonTexts({});
     try {
       const res = await fetch(`${API_URL}/classroom/exercise`, {
         method: 'POST',
@@ -162,14 +185,64 @@ export default function ApprendsPage() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const title = extractTitle(data.exercise);
-      const created = await createClassroomExercise(title, data.exercise);
-      setExercises(prev => [created, ...prev]);
-      selectExercise(created);
+      setExerciseProposals(data.exercises || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Impossible de générer un exercice.");
+      setError(e instanceof Error ? e.message : "Impossible de générer des exercices.");
     } finally {
       setIsGeneratingExercise(false);
+    }
+  };
+
+  const chooseExerciseProposal = async (markdown: string) => {
+    const title = extractTitle(markdown);
+    const created = await createClassroomExercise(title, markdown);
+    setExercises(prev => [created, ...prev]);
+    selectExercise(created);
+    setExerciseProposals([]);
+  };
+
+  const fetchLesson = async (index: number, proposal: string) => {
+    if (lessonTexts[index]) {
+      setOpenLessonIndex(prev => prev === index ? null : index);
+      return;
+    }
+    setOpenLessonIndex(index);
+    setLoadingLessonIndex(index);
+    try {
+      await streamInto(
+        `${API_URL}/classroom/lesson`,
+        { exercise_prompt: proposal },
+        (text) => setLessonTexts(prev => ({ ...prev, [index]: text }))
+      );
+    } catch (e: unknown) {
+      setLessonTexts(prev => ({ ...prev, [index]: e instanceof Error ? `⚠️ ${e.message}` : '⚠️ Impossible de générer le cours.' }));
+    } finally {
+      setLoadingLessonIndex(null);
+    }
+  };
+
+  const fetchSelectedLesson = async () => {
+    if (!selected) return;
+    if (selected.lesson) {
+      setShowLesson(s => !s);
+      return;
+    }
+    setShowLesson(true);
+    setIsLoadingSelectedLesson(true);
+    try {
+      const full = await streamInto(
+        `${API_URL}/classroom/lesson`,
+        { exercise_prompt: selected.promptMarkdown },
+        (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, lesson: text } : e))
+      );
+      await updateClassroomExercise(selected.id, { lesson: full });
+      setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, lesson: full } : e));
+      setSelected(prev => prev ? { ...prev, lesson: full } : prev);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Impossible de générer le cours.");
+      setShowLesson(false);
+    } finally {
+      setIsLoadingSelectedLesson(false);
     }
   };
 
@@ -228,9 +301,9 @@ export default function ApprendsPage() {
         { text: plainText, exercise_prompt: selected.promptMarkdown, num_students: 5 },
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: text } : e))
       );
-      await updateClassroomExercise(selected.id, { peerComments: full, status: 'reviewed' });
-      setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: full, status: 'reviewed' } : e));
-      setSelected(prev => prev ? { ...prev, peerComments: full, status: 'reviewed' } : prev);
+      await updateClassroomExercise(selected.id, { peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' });
+      setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : e));
+      setSelected(prev => prev ? { ...prev, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : prev);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Les camarades n'ont pas pu commenter.");
     } finally {
@@ -246,6 +319,8 @@ export default function ApprendsPage() {
     setIsLoadingTeacher(true);
     setError(null);
     try {
+      // The peer comments may refer to an earlier draft if the student kept editing since then
+      const textChangedSincePeerReview = !!selected.peerReviewTextSnapshot && plainText !== selected.peerReviewTextSnapshot;
       const full = await streamInto(
         `${API_URL}/classroom/teacher-critique`,
         {
@@ -254,6 +329,7 @@ export default function ApprendsPage() {
           peer_comments: selected.peerComments || null,
           on_demand: onDemand,
           past_syntheses: getPastSyntheses(selected.id),
+          text_changed_since_peer_review: textChangedSincePeerReview,
         },
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, teacherCritique: text } : e))
       );
@@ -289,8 +365,8 @@ export default function ApprendsPage() {
       {/* Sidebar */}
       <div className="w-[17rem] flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-          <h1 className="text-[var(--accent)] font-semibold text-sm tracking-widest uppercase">🎓 J&apos;apprends</h1>
-          <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent)] text-xs transition-colors" title="Retour à l'accueil">
+          <h1 className="font-display gradient-text font-bold text-base tracking-tight">🎓 J&apos;apprends</h1>
+          <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
             ← Accueil
           </Link>
         </div>
@@ -398,7 +474,25 @@ export default function ApprendsPage() {
             {/* Writing column */}
             <div className="flex-1 flex flex-col overflow-hidden border-r border-[var(--border-subtle)]">
               <div className="px-6 py-4 border-b border-[var(--border-subtle)] overflow-y-auto max-h-64">
-                {renderMarkdown(selected.promptMarkdown)}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">{renderMarkdown(selected.promptMarkdown)}</div>
+                  <button
+                    onClick={fetchSelectedLesson}
+                    disabled={isLoadingSelectedLesson}
+                    className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--accent-3)]/50 hover:text-[var(--accent-3)] transition-all disabled:opacity-50"
+                  >
+                    {isLoadingSelectedLesson ? '⏳' : showLesson ? '📚 Masquer le cours' : '📚 Le cours'}
+                  </button>
+                </div>
+                {showLesson && (
+                  <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+                    {isLoadingSelectedLesson && !selected.lesson ? (
+                      <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
+                    ) : (
+                      renderMarkdown(selected.lesson || '')
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
@@ -485,6 +579,74 @@ export default function ApprendsPage() {
           </div>
         )}
       </div>
+
+      {/* Exercise proposals: pick one of 3 varied exercises */}
+      {exerciseProposals.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" onClick={() => setExerciseProposals([])}>
+          <div
+            className="bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-2xl shadow-2xl w-full max-w-6xl max-h-[85vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <h3 className="font-display gradient-text font-bold text-base">🎓 {teacherName} vous propose 3 exercices</h3>
+              <button onClick={() => setExerciseProposals([])} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {exerciseProposals.map((proposal, i) => (
+                <div key={i} className="card-modern rounded-2xl p-4 flex flex-col overflow-hidden">
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {extractField(proposal, 'Type') && (
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold uppercase tracking-wide">
+                        {extractField(proposal, 'Type')}
+                      </span>
+                    )}
+                    {extractField(proposal, 'Genre') && (
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--accent-3)]/15 text-[var(--accent-3)] text-[10px] font-semibold uppercase tracking-wide">
+                        {extractField(proposal, 'Genre')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-y-auto pr-1 text-sm">
+                    {renderMarkdown(proposal)}
+                    {openLessonIndex === i && (
+                      <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+                        {loadingLessonIndex === i && !lessonTexts[i] ? (
+                          <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
+                        ) : (
+                          renderMarkdown(lessonTexts[i] || '')
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 mt-3 flex-shrink-0">
+                    <button
+                      onClick={() => fetchLesson(i, proposal)}
+                      className="flex-1 py-2 rounded-lg text-sm font-medium border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--accent-3)]/50 hover:text-[var(--accent-3)] transition-all"
+                    >
+                      {loadingLessonIndex === i ? '⏳' : openLessonIndex === i ? '📚 Masquer' : '📚 Le cours'}
+                    </button>
+                    <button
+                      onClick={() => chooseExerciseProposal(proposal)}
+                      className="btn-accent flex-1 py-2 rounded-lg text-sm"
+                    >
+                      Choisir cet exercice
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-3 border-t border-[var(--border-subtle)] flex justify-end">
+              <button
+                onClick={handleNewExercise}
+                disabled={isGeneratingExercise}
+                className="text-[var(--text-muted)] hover:text-[var(--accent)] text-xs font-medium transition-colors disabled:opacity-40"
+              >
+                {isGeneratingExercise ? '⏳ Le prof réfléchit…' : '🔄 Proposer 3 autres exercices'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

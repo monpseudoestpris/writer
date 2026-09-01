@@ -2,21 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
 
 :root {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #111118;
+  --bg-primary: #0a0a12;
+  --bg-secondary: #101018;
   --bg-elevated: #16161f;
-  --bg-surface: #1c1c28;
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-medium: rgba(255, 255, 255, 0.1);
-  --accent: #c9a55a;
-  --accent-soft: rgba(201, 165, 90, 0.15);
-  --accent-glow: rgba(201, 165, 90, 0.08);
-  --text-primary: #e8e6e1;
-  --text-secondary: #9a9890;
-  --text-muted: #5c5a55;
+  --bg-surface: #1b1b2a;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-medium: rgba(255, 255, 255, 0.14);
+  --accent: #8b5cf6;
+  --accent-2: #ec4899;
+  --accent-3: #22d3ee;
+  --accent-soft: rgba(139, 92, 246, 0.16);
+  --accent-glow: rgba(139, 92, 246, 0.12);
+  --gradient-accent: linear-gradient(135deg, var(--accent-3), var(--accent) 55%, var(--accent-2));
+  --text-primary: #f2f0fb;
+  --text-secondary: #a9a4c4;
+  --text-muted: #605c80;
 }
 
 html, body {
@@ -29,19 +32,65 @@ html, body {
   background: var(--bg-primary);
 }
 
+body {
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38rem 26rem at 12% -8%, rgba(139, 92, 246, 0.16), transparent 60%),
+    radial-gradient(30rem 24rem at 108% 8%, rgba(236, 72, 153, 0.12), transparent 60%),
+    radial-gradient(26rem 22rem at 50% 118%, rgba(34, 211, 238, 0.08), transparent 60%);
+}
+
+#__next, body > div {
+  position: relative;
+  z-index: 1;
+}
+
+.font-display {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.gradient-text {
+  background: var(--gradient-accent);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradientShift 6s ease infinite;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes floatBlob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(2%, -3%) scale(1.05); }
+  66% { transform: translate(-2%, 2%) scale(0.97); }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(139, 92, 246, 0.25);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.14);
+  background-color: rgba(139, 92, 246, 0.4);
 }
 
 /* Smooth critique content appearance */
@@ -112,11 +161,11 @@ html, body {
 }
 
 /* Dark colors for headings inside paper editor */
-.editor-area .tiptap h1 { color: #111; }
-.editor-area .tiptap h2 { color: #5a3e1b; }
+.editor-area .tiptap h1 { color: #171225; }
+.editor-area .tiptap h2 { color: #5b3e8f; }
 .editor-area .tiptap h3 { color: #3a3a3a; }
-.editor-area .tiptap blockquote { color: #444; border-left-color: #8b6914; }
-.editor-area .tiptap strong, .editor-area .tiptap b { color: #111; }
+.editor-area .tiptap blockquote { color: #444; border-left-color: #8b5cf6; }
+.editor-area .tiptap strong, .editor-area .tiptap b { color: #171225; }
 .editor-area .tiptap hr { border-top-color: rgba(0, 0, 0, 0.15); }
 .editor-area .tiptap p.is-editor-empty:first-child::before { color: #999; }
 
@@ -216,27 +265,29 @@ html, body {
 }
 
 .critique-area a {
-  color: #c9a55a;
+  color: var(--accent-3);
 }
 
 /* Glass effect */
 .glass {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 /* Subtle glow on accent buttons */
 .btn-accent {
-  background: linear-gradient(135deg, var(--accent), #b8944a);
-  color: #0a0a0f;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  box-shadow: 0 0 0 0 rgba(201, 165, 90, 0);
+  background: var(--gradient-accent);
+  background-size: 200% 200%;
+  color: #0a0a12;
+  font-weight: 700;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 0 0 rgba(139, 92, 246, 0);
 }
 .btn-accent:hover:not(:disabled) {
-  box-shadow: 0 0 20px rgba(201, 165, 90, 0.25);
-  transform: translateY(-1px);
+  background-position: 100% 50%;
+  box-shadow: 0 8px 28px -8px rgba(139, 92, 246, 0.55);
+  transform: translateY(-1px) scale(1.01);
 }
 .btn-accent:disabled {
   opacity: 0.35;
@@ -249,7 +300,7 @@ html, body {
   border-left: 2px solid transparent;
 }
 .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
 }
 .sidebar-item.active {
   background: var(--accent-glow);
@@ -268,7 +319,7 @@ html, body {
   left: 50%;
   width: 0;
   height: 2px;
-  background: var(--accent);
+  background: var(--gradient-accent);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   transform: translateX(-50%);
   border-radius: 1px;
@@ -293,8 +344,8 @@ html, body {
   transition: all 0.2s ease;
 }
 .input-writer:focus {
-  border-color: rgba(201, 165, 90, 0.4);
-  box-shadow: 0 0 0 3px rgba(201, 165, 90, 0.08);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
   outline: none;
 }
 .input-writer::placeholder {
@@ -303,8 +354,21 @@ html, body {
 
 /* Divider gradient */
 .divider-glow {
-  background: linear-gradient(90deg, transparent, rgba(201, 165, 90, 0.15), transparent);
+  background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.25), transparent);
   height: 1px;
+}
+
+/* Card hover lift, used for modern tiles/cards throughout the app */
+.card-modern {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-modern:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px -20px rgba(139, 92, 246, 0.45);
 }
 
 /* Force cursor during panel resize */

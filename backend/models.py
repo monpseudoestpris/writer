@@ -143,6 +143,10 @@ class ClassroomExerciseRequest(BaseModel):
     past_syntheses: Optional[list[dict]] = None  # [{title, synthesis}] from the student's progress record
 
 
+class ClassroomLessonRequest(BaseModel):
+    exercise_prompt: str  # the proposed exercise markdown, to tailor the lesson to its type/genre
+
+
 class ClassroomPeerReviewRequest(BaseModel):
     text: str
     exercise_prompt: str
@@ -156,6 +160,7 @@ class ClassroomTeacherRequest(BaseModel):
     peer_comments: Optional[str] = None  # provided when students already reviewed
     on_demand: bool = False  # True if the student asks for help mid-exercise
     past_syntheses: Optional[list[dict]] = None  # [{title, synthesis}] from the student's progress record
+    text_changed_since_peer_review: bool = False  # True if the student edited the text after peer review
 
 
 class ClassroomSynthesisRequest(BaseModel):
