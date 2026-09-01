@@ -190,3 +190,17 @@ async def get_structured_comments(text: str, system_prompt: str) -> str:
         messages=messages
     )
     return response.choices[0].message.content
+
+
+async def generate_text_from_mistral(system_prompt: str, user_content: str) -> str:
+    """Appel non-streaming au meilleur modèle Mistral, pour générer un contenu texte libre."""
+    client = get_mistral_client()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    response = await client.chat.complete_async(
+        model=MISTRAL_BEST_MODEL,
+        messages=messages
+    )
+    return response.choices[0].message.content

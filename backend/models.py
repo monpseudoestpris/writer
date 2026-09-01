@@ -134,3 +134,32 @@ class RewriteRequest(BaseModel):
     all_entries_context: Optional[str] = None
 
 
+# ==========================================
+# CLASSE D'ÉCRITURE CRÉATIVE ("J'apprends")
+# ==========================================
+
+class ClassroomExerciseRequest(BaseModel):
+    previous_exercise_titles: Optional[list[str]] = None  # to avoid repeats
+    past_syntheses: Optional[list[dict]] = None  # [{title, synthesis}] from the student's progress record
+
+
+class ClassroomPeerReviewRequest(BaseModel):
+    text: str
+    exercise_prompt: str
+    num_students: int = 5
+    student_ids: Optional[list[str]] = None  # force specific students instead of random pick
+
+
+class ClassroomTeacherRequest(BaseModel):
+    text: str
+    exercise_prompt: str
+    peer_comments: Optional[str] = None  # provided when students already reviewed
+    on_demand: bool = False  # True if the student asks for help mid-exercise
+    past_syntheses: Optional[list[dict]] = None  # [{title, synthesis}] from the student's progress record
+
+
+class ClassroomSynthesisRequest(BaseModel):
+    exercise_prompt: str
+    critique: str  # the teacher's final critique to summarize into the progress record
+
+

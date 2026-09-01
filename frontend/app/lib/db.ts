@@ -71,6 +71,19 @@ export interface TextVersion {
   createdAt: Date;
 }
 
+export interface ClassroomExercise {
+  id: string;
+  title: string;           // short title extracted from the teacher's exercise
+  promptMarkdown: string;  // full exercise statement from the teacher
+  content: string;         // student's current HTML content
+  peerComments: string;    // latest peer review markdown ('' if none yet)
+  teacherCritique: string; // latest teacher critique markdown ('' if none yet)
+  synthesis: string;       // +/- synthesis added to the student's progress record once completed ('' if none yet)
+  status: 'draft' | 'reviewed' | 'completed';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export const WB_CATEGORIES = [
   { id: 'monde', label: 'Monde', icon: '🌍' },
   { id: 'pitch_visible', label: 'Pitch · Ce que sait le lecteur', icon: '👁️' },
@@ -131,6 +144,10 @@ interface WriterDB extends DBSchema {
     value: TextVersion;
     indexes: { 'by-source': string };
   };
+  classroomExercises: {
+    key: string;
+    value: ClassroomExercise;
+  };
 }
 
 let dbInstance: IDBPDatabase<WriterDB> | null = null;
@@ -138,9 +155,9 @@ let dbInstance: IDBPDatabase<WriterDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<WriterDB>('writer-db', 7, {
+  dbInstance = await openDB<WriterDB>('writer-db', 8, {
     upgrade(db, oldVersion) {
-      console.log(`[DB] Upgrading from v${oldVersion} to v7`);
+      console.log(`[DB] Upgrading from v${oldVersion} to v8`);
       if (oldVersion < 1) {
         // Books store
         const bookStore = db.createObjectStore('books', { keyPath: 'id' });
@@ -181,6 +198,10 @@ export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
         const versionStore = db.createObjectStore('textVersions', { keyPath: 'id' });
         versionStore.createIndex('by-source', 'sourceId');
       }
+      if (oldVersion < 8) {
+        // Classroom exercises store ("J'apprends")
+        db.createObjectStore('classroomExercises', { keyPath: 'id' });
+      }
     },
     blocked() {
       console.warn('[DB] Upgrade blocked — close other tabs using this app and refresh.');
@@ -199,7 +220,7 @@ export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
     },
   });
 
-  console.log('[DB] Opened successfully at v7');
+  console.log('[DB] Opened successfully at v8');
 
   return dbInstance;
 }
@@ -524,6 +545,57 @@ export async function deleteTextVersionsBySource(sourceId: string): Promise<void
   for (const v of all) {
     await db.delete('textVersions', v.id);
   }
+}
+
+// ==========================================
+// CLASSROOM ("J'apprends")
+// ==========================================
+
+export async function createClassroomExercise(title: string, promptMarkdown: string): Promise<ClassroomExercise> {
+  const db = await getDB();
+  const exercise: ClassroomExercise = {
+    id: crypto.randomUUID(),
+    title,
+    promptMarkdown,
+    content: '',
+    peerComments: '',
+    teacherCritique: '',
+    synthesis: '',
+    status: 'draft',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await db.put('classroomExercises', exercise);
+  return exercise;
+}
+
+export async function getClassroomExercises(): Promise<ClassroomExercise[]> {
+  const db = await getDB();
+  const all = await db.getAll('classroomExercises');
+  return all
+    .map(e => ({ ...e, synthesis: e.synthesis ?? '' }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function getClassroomExercise(id: string): Promise<ClassroomExercise | undefined> {
+  const db = await getDB();
+  return db.get('classroomExercises', id);
+}
+
+export async function updateClassroomExercise(
+  id: string,
+  updates: Partial<Pick<ClassroomExercise, 'content' | 'peerComments' | 'teacherCritique' | 'synthesis' | 'status'>>
+): Promise<void> {
+  const db = await getDB();
+  const exercise = await db.get('classroomExercises', id);
+  if (exercise) {
+    await db.put('classroomExercises', { ...exercise, ...updates, updatedAt: new Date() });
+  }
+}
+
+export async function deleteClassroomExercise(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('classroomExercises', id);
 }
 
 // ==========================================
