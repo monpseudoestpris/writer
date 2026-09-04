@@ -4,6 +4,8 @@ from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
 import re
+import logging
+import time
 from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest, ClassroomAuthorJudgmentRequest
 from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages, get_structured_comments, generate_text_from_mistral
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
@@ -16,7 +18,39 @@ from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT,
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+backend_logger = logging.getLogger("backend")
+backend_logger.setLevel(logging.INFO)
+if not backend_logger.handlers:
+    trace_handler = logging.StreamHandler()
+    trace_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    backend_logger.addHandler(trace_handler)
+backend_logger.propagate = False
+
 app = FastAPI()
+
+
+@app.middleware("http")
+async def log_api_requests(request, call_next):
+    started_at = time.perf_counter()
+    method = request.method
+    path = request.url.path
+    logger.info("[API] request_started method=%s path=%s", method, path)
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        logger.exception("[API] request_failed method=%s path=%s duration_ms=%.1f", method, path, duration_ms)
+        raise
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "[API] response_sent method=%s path=%s status=%d duration_ms=%.1f",
+        method,
+        path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
 
 # CORS middleware pour permettre les requêtes depuis le frontend
 app.add_middleware(
@@ -48,9 +82,31 @@ async def get_config():
 def _pick_provider(preferred: list[tuple[str, callable, str]]):
     for env_var, stream_fn, model in preferred:
         if os.getenv(env_var):
-            return stream_fn, model
+            provider = env_var.removesuffix("_API_KEY").lower()
+            logger.info("[AI] provider_selected provider=%s model=%s", provider, model)
+            return stream_fn, model, provider
     fallback = preferred[-1]
-    return fallback[1], fallback[2]
+    provider = fallback[0].removesuffix("_API_KEY").lower()
+    logger.info("[AI] provider_selected provider=%s model=%s fallback=true", provider, fallback[2])
+    return fallback[1], fallback[2], provider
+
+
+async def _trace_ai_response(stream, provider: str, model: str):
+    response_parts: list[str] = []
+    logger.info("[AI] request_started provider=%s model=%s", provider, model)
+    try:
+        async for chunk in stream:
+            response_parts.append(chunk)
+            yield chunk
+    finally:
+        response = ''.join(response_parts)
+        logger.info(
+            "[AI] response_received provider=%s model=%s chars=%d preview=%r",
+            provider,
+            model,
+            len(response),
+            response[:500],
+        )
 
 @app.get("/reviewers")
 async def get_reviewers():
@@ -952,6 +1008,11 @@ def _build_student_record(past_syntheses: list[dict] | None) -> str:
 @app.post("/classroom/exercise")
 async def classroom_exercise(request: ClassroomExerciseRequest):
     """Le professeur propose 3 exercices d'écriture différents, parmi lesquels l'élève choisit."""
+    logger.info(
+        "[AI] route_started route=classroom_exercise model=%s previous_titles=%d",
+        MISTRAL_BEST_MODEL,
+        len(request.previous_exercise_titles),
+    )
     avoid_repeats = ""
     if request.previous_exercise_titles:
         titles = "\n".join(f"- {t}" for t in request.previous_exercise_titles[-15:])
@@ -971,6 +1032,7 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
     try:
         raw = await generate_text_from_mistral(system_prompt, "Propose-moi 3 exercices au choix pour la classe.")
     except Exception as e:
+        logger.exception("[AI] route_failed route=classroom_exercise model=%s", MISTRAL_BEST_MODEL)
         return {"error": str(e)}
     parts = re.split(r"=+\s*EXERCICE_SUIVANT\s*=+", raw)
     exercises = [p.strip() for p in parts if p.strip()]
@@ -981,6 +1043,12 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
         genre_match = re.search(r"\*\*Genre\s*:\*\*\s*(.+)", ex, re.IGNORECASE)
         author_id = get_author_for_genre(genre_match.group(1) if genre_match else None)
         authors.append({"id": author_id, "name": AUTHORS[author_id]["name"]})
+    logger.info(
+        "[AI] route_completed route=classroom_exercise model=%s exercises=%d response_chars=%d",
+        MISTRAL_BEST_MODEL,
+        len(exercises),
+        len(raw),
+    )
     return {"exercises": exercises, "authors": authors}
 
 
@@ -1024,13 +1092,13 @@ async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
         peer_context=peer_context,
     )
     # L'auteur est le rôle le plus exigeant en fidélité stylistique : on préfère Opus, puis GPT, puis Mistral.
-    stream_fn, model = _pick_provider([
+    stream_fn, model, provider = _pick_provider([
         ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_BEST_MODEL),
         ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_BEST_MODEL),
         ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_BEST_MODEL),
     ])
     return StreamingResponse(
-        stream_fn(request.text, system_prompt, model=model),
+        _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
         media_type="text/plain"
     )
 
@@ -1069,7 +1137,11 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
     async def stream_with_header():
         yield f"*🧑‍🎓 {', '.join(chosen_names)} lisent votre texte…*\n\n---\n\n"
         # Le panel d'élèves n'a pas besoin du modèle le plus coûteux : dialogues courts et casual.
-        async for chunk in stream_critique_from_mistral(request.text, panel_system, model=MISTRAL_MEDIUM_MODEL):
+        async for chunk in _trace_ai_response(
+            stream_critique_from_mistral(request.text, panel_system, model=MISTRAL_MEDIUM_MODEL),
+            "mistral",
+            MISTRAL_MEDIUM_MODEL,
+        ):
             yield chunk
 
     return StreamingResponse(
@@ -1105,13 +1177,13 @@ async def classroom_teacher_critique(request: ClassroomTeacherRequest):
         student_record=student_record,
     )
 
-    stream_fn, model = _pick_provider([
+    stream_fn, model, provider = _pick_provider([
         ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
         ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
         ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_MEDIUM_MODEL),
     ])
     return StreamingResponse(
-        stream_fn(request.text, system_prompt, model=model),
+        _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
         media_type="text/plain"
     )
 

@@ -83,10 +83,19 @@ export interface ClassroomExercise {
   authorId: string;        // id from backend.auteurs.AUTHORS assigned to judge this exercise ('' if none)
   authorName: string;      // display name of the assigned author ('' if none)
   authorJudgment: string;  // latest judgment markdown from the assigned author ('' if none yet)
+  commentHistory: ClassroomComment[];
   synthesis: string;       // +/- synthesis added to the student's progress record once completed ('' if none yet)
   status: 'draft' | 'reviewed' | 'completed';
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ClassroomComment {
+  id: string;
+  source: 'peers' | 'teacher' | 'author';
+  content: string;
+  textSnapshot?: string;
+  createdAt: Date;
 }
 
 export type ClassroomExperienceLevel =
@@ -175,9 +184,9 @@ let dbInstance: IDBPDatabase<WriterDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<WriterDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<WriterDB>('writer-db', 8, {
+  dbInstance = await openDB<WriterDB>('writer-db', 9, {
     upgrade(db, oldVersion) {
-      console.log(`[DB] Upgrading from v${oldVersion} to v8`);
+      console.log(`[DB] Upgrading from v${oldVersion} to v9`);
       if (oldVersion < 1) {
         // Books store
         const bookStore = db.createObjectStore('books', { keyPath: 'id' });
@@ -610,6 +619,7 @@ export async function createClassroomExercise(title: string, promptMarkdown: str
     authorId,
     authorName,
     authorJudgment: '',
+    commentHistory: [],
     synthesis: '',
     status: 'draft',
     createdAt: new Date(),
@@ -631,6 +641,11 @@ export async function getClassroomExercises(): Promise<ClassroomExercise[]> {
       authorId: e.authorId ?? '',
       authorName: e.authorName ?? '',
       authorJudgment: e.authorJudgment ?? '',
+      commentHistory: e.commentHistory?.length ? e.commentHistory : [
+        ...(e.peerComments ? [{ id: `${e.id}-peers`, source: 'peers' as const, content: e.peerComments, textSnapshot: e.peerReviewTextSnapshot || undefined, createdAt: e.updatedAt }] : []),
+        ...(e.teacherCritique ? [{ id: `${e.id}-teacher`, source: 'teacher' as const, content: e.teacherCritique, createdAt: e.updatedAt }] : []),
+        ...(e.authorJudgment ? [{ id: `${e.id}-author`, source: 'author' as const, content: e.authorJudgment, createdAt: e.updatedAt }] : []),
+      ],
     }))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
@@ -649,6 +664,20 @@ export async function updateClassroomExercise(
   if (exercise) {
     await db.put('classroomExercises', { ...exercise, ...updates, updatedAt: new Date() });
   }
+}
+
+export async function appendClassroomComment(id: string, comment: Omit<ClassroomComment, 'id' | 'createdAt'>): Promise<ClassroomComment | undefined> {
+  const db = await getDB();
+  const exercise = await db.get('classroomExercises', id);
+  if (!exercise) return undefined;
+  const history = exercise.commentHistory ?? [];
+  const entry = { ...comment, id: crypto.randomUUID(), createdAt: new Date() };
+  await db.put('classroomExercises', {
+      ...exercise,
+      commentHistory: [...history, entry],
+      updatedAt: new Date(),
+  });
+  return entry;
 }
 
 export async function deleteClassroomExercise(id: string): Promise<void> {

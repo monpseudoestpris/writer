@@ -1,9 +1,16 @@
 import os
+import logging
 from typing import AsyncGenerator
 
 from mistralai.client import Mistral
 
 from backend.ai_models import MISTRAL_BEST_MODEL
+
+logger = logging.getLogger(__name__)
+
+
+def _log_mistral_response(model: str, response: str) -> None:
+    logger.info("[AI] response_received provider=mistral model=%s chars=%d preview=%r", model, len(response), response[:500])
 
 
 def get_mistral_client():
@@ -14,6 +21,7 @@ def get_mistral_client():
 
 async def summarize_single_critique(critique: str) -> str:
     """Generate a short summary of a single critique with Mistral's best model."""
+    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_single_critique", MISTRAL_BEST_MODEL)
     client = get_mistral_client()
     
     messages = [
@@ -33,11 +41,14 @@ async def summarize_single_critique(critique: str) -> str:
         messages=messages
     )
     
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    return result
 
 
 async def summarize_text(text: str) -> str:
     """Generate a factual 5-10 line summary with Mistral's best model."""
+    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_text", MISTRAL_BEST_MODEL)
     client = get_mistral_client()
     
     messages = [
@@ -59,11 +70,14 @@ async def summarize_text(text: str) -> str:
         messages=messages
     )
     
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    return result
 
 
 async def summarize_critiques(critiques: list[dict]) -> str:
     """Summarize previous critiques into a concise digest with Mistral's best model."""
+    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_critiques", MISTRAL_BEST_MODEL)
     client = get_mistral_client()
     
     critiques_text = "\n\n".join(
@@ -89,10 +103,14 @@ async def summarize_critiques(critiques: list[dict]) -> str:
         messages=messages
     )
     
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    return result
 
 
 async def stream_critique_from_mistral(text: str, prompt: str, model: str = MISTRAL_BEST_MODEL) -> AsyncGenerator[str, None]:
+    logger.info("[AI] request_started provider=mistral model=%s", model)
+    response_parts: list[str] = []
     client = get_mistral_client()
     user_content = (
         "[DÉBUT DU TEXTE À CRITIQUER]\n"
@@ -111,11 +129,16 @@ async def stream_critique_from_mistral(text: str, prompt: str, model: str = MIST
         messages=messages
     ):
         if chunk.data.choices[0].delta.content:
-            yield chunk.data.choices[0].delta.content
+            delta = chunk.data.choices[0].delta.content
+            response_parts.append(delta)
+            yield delta
+    logger.info("[AI] response_received provider=mistral model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
 
 
 async def stream_from_mistral_small(system_prompt: str, user_content: str) -> AsyncGenerator[str, None]:
     """Stream an auto-fill response with Mistral's best model."""
+    logger.info("[AI] request_started provider=mistral model=%s", MISTRAL_BEST_MODEL)
+    response_parts: list[str] = []
     client = get_mistral_client()
     messages = [
         {"role": "system", "content": system_prompt},
@@ -127,11 +150,15 @@ async def stream_from_mistral_small(system_prompt: str, user_content: str) -> As
         messages=messages
     ):
         if chunk.data.choices[0].delta.content:
-            yield chunk.data.choices[0].delta.content
+            delta = chunk.data.choices[0].delta.content
+            response_parts.append(delta)
+            yield delta
+    _log_mistral_response(MISTRAL_BEST_MODEL, ''.join(response_parts))
 
 
 async def summarize_chat_messages(messages: list[dict]) -> str:
     """Summarize a batch of chat messages with Mistral's best model."""
+    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_chat_messages", MISTRAL_BEST_MODEL)
     client = get_mistral_client()
     formatted = "\n".join(
         f"{'Auteur' if m['role']=='user' else 'Critique'}: {m['content']}"
@@ -153,7 +180,9 @@ async def summarize_chat_messages(messages: list[dict]) -> str:
             {"role": "user", "content": formatted}
         ]
     )
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    return result
 
 
 async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, None]:
@@ -162,6 +191,8 @@ async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, 
     Messages should include system prompt and full conversation history.
     Mistral automatically applies prefix caching on the shared prefix.
     """
+    logger.info("[AI] request_started provider=mistral model=%s", MISTRAL_BEST_MODEL)
+    response_parts: list[str] = []
     client = get_mistral_client()
     
     async for chunk in await client.chat.stream_async(
@@ -169,11 +200,15 @@ async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, 
         messages=messages
     ):
         if chunk.data.choices[0].delta.content:
-            yield chunk.data.choices[0].delta.content
+            delta = chunk.data.choices[0].delta.content
+            response_parts.append(delta)
+            yield delta
+    _log_mistral_response(MISTRAL_BEST_MODEL, ''.join(response_parts))
 
 
 async def get_structured_comments(text: str, system_prompt: str) -> str:
     """Appel au meilleur modèle Mistral pour obtenir des commentaires JSON structurés."""
+    logger.info("[AI] request_started provider=mistral model=%s operation=get_structured_comments", MISTRAL_BEST_MODEL)
     client = get_mistral_client()
     user_content = (
         "[DÉBUT DU DOCUMENT]\n"
@@ -189,11 +224,14 @@ async def get_structured_comments(text: str, system_prompt: str) -> str:
         model=MISTRAL_BEST_MODEL,
         messages=messages
     )
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    return result
 
 
 async def generate_text_from_mistral(system_prompt: str, user_content: str) -> str:
     """Appel non-streaming au meilleur modèle Mistral, pour générer un contenu texte libre."""
+    logger.info("[AI] request_started provider=mistral model=%s operation=generate_text", MISTRAL_BEST_MODEL)
     client = get_mistral_client()
     messages = [
         {"role": "system", "content": system_prompt},
@@ -203,4 +241,6 @@ async def generate_text_from_mistral(system_prompt: str, user_content: str) -> s
         model=MISTRAL_BEST_MODEL,
         messages=messages
     )
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    return result

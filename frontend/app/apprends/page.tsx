@@ -7,6 +7,7 @@ import {
   getClassroomExercises,
   createClassroomExercise,
   updateClassroomExercise,
+  appendClassroomComment,
   deleteClassroomExercise,
   getLastClassroomExerciseId,
   saveLastClassroomExerciseId,
@@ -155,6 +156,14 @@ export default function ApprendsPage() {
   const [isLoadingSelectedLesson, setIsLoadingSelectedLesson] = useState(false);
   const [exerciseAuthors, setExerciseAuthors] = useState<{ id: string; name: string }[]>([]);
   const [isLoadingAuthorJudgment, setIsLoadingAuthorJudgment] = useState(false);
+  const [feedbackTab, setFeedbackTab] = useState<'latest' | 'history'>('latest');
+  const [expandedCommentVersions, setExpandedCommentVersions] = useState<Set<string>>(new Set());
+  const [editorWidth, setEditorWidth] = useState(50);
+  const [isDragging, setIsDragging] = useState(false);
+  const mainContentRef = useRef<HTMLDivElement>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(272);
+  const [isSidebarDragging, setIsSidebarDragging] = useState(false);
+  const layoutRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -186,6 +195,8 @@ export default function ApprendsPage() {
     setContent(ex.content || '');
     setError(null);
     setShowLesson(false);
+    setFeedbackTab('latest');
+    setExpandedCommentVersions(new Set());
     saveLastClassroomExerciseId(ex.id).catch(() => {});
   };
 
@@ -295,6 +306,11 @@ export default function ApprendsPage() {
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: text } : e))
       );
       await updateClassroomExercise(selected.id, { authorJudgment: full });
+      const historyEntry = await appendClassroomComment(selected.id, { source: 'author', content: full, textSnapshot: plainText });
+      if (historyEntry) {
+        setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, commentHistory: [...e.commentHistory, historyEntry] } : e));
+        setSelected(prev => prev ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
+      }
       setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: full } : e));
       setSelected(prev => prev ? { ...prev, authorJudgment: full } : prev);
     } catch (e: unknown) {
@@ -360,6 +376,11 @@ export default function ApprendsPage() {
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: text } : e))
       );
       await updateClassroomExercise(selected.id, { peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' });
+      const historyEntry = await appendClassroomComment(selected.id, { source: 'peers', content: full, textSnapshot: plainText });
+      if (historyEntry) {
+        setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, commentHistory: [...e.commentHistory, historyEntry] } : e));
+        setSelected(prev => prev ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
+      }
       setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : e));
       setSelected(prev => prev ? { ...prev, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : prev);
     } catch (e: unknown) {
@@ -408,6 +429,11 @@ export default function ApprendsPage() {
         }
       }
       await updateClassroomExercise(selected.id, { teacherCritique: full, status, synthesis });
+      const historyEntry = await appendClassroomComment(selected.id, { source: 'teacher', content: full, textSnapshot: plainText });
+      if (historyEntry) {
+        setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, commentHistory: [...e.commentHistory, historyEntry] } : e));
+        setSelected(prev => prev ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
+      }
       setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, teacherCritique: full, status, synthesis } : e));
       setSelected(prev => prev ? { ...prev, teacherCritique: full, status, synthesis } : prev);
     } catch (e: unknown) {
@@ -419,10 +445,49 @@ export default function ApprendsPage() {
 
   const wordCount = htmlToPlainText(content).trim().split(/\s+/).filter(Boolean).length;
 
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!mainContentRef.current) return;
+      const rect = mainContentRef.current.getBoundingClientRect();
+      const percentage = ((event.clientX - rect.left) / rect.width) * 100;
+      setEditorWidth(Math.min(85, Math.max(15, percentage)));
+    };
+    const handleMouseUp = () => setIsDragging(false);
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.classList.add('resizing-h');
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.classList.remove('resizing-h');
+    };
+  }, [isDragging]);
+
+  useEffect(() => {
+    if (!isSidebarDragging) return;
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!layoutRef.current) return;
+      const rect = layoutRef.current.getBoundingClientRect();
+      setSidebarWidth(Math.min(420, Math.max(220, event.clientX - rect.left)));
+    };
+    const handleMouseUp = () => setIsSidebarDragging(false);
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.classList.add('resizing-h');
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.classList.remove('resizing-h');
+    };
+  }, [isSidebarDragging]);
+
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
+    <div ref={layoutRef} className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
       {/* Sidebar */}
-      <div className="w-[17rem] flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden" style={{ width: `${sidebarWidth}px` }}>
         <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
           <h1 className="font-display gradient-text font-bold text-base tracking-tight">🎓 J&apos;apprends</h1>
           <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
@@ -556,6 +621,35 @@ export default function ApprendsPage() {
         )}
       </div>
 
+      {isSidebarDragging && (
+        <div className="fixed inset-0 z-50" style={{ cursor: 'col-resize' }} />
+      )}
+
+      <div
+        className="flex-shrink-0"
+        style={{
+          width: '6px',
+          height: '100%',
+          cursor: 'col-resize',
+          backgroundColor: isSidebarDragging ? 'var(--accent)' : 'var(--border-medium)',
+          position: 'relative',
+          zIndex: 10,
+          transition: 'background-color 0.15s',
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsSidebarDragging(true);
+        }}
+        onMouseEnter={(event) => {
+          if (!isSidebarDragging) event.currentTarget.style.backgroundColor = 'var(--accent)';
+        }}
+        onMouseLeave={(event) => {
+          if (!isSidebarDragging) event.currentTarget.style.backgroundColor = 'var(--border-medium)';
+        }}
+        aria-label="Redimensionner la colonne de navigation"
+      />
+
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {!selected ? (
@@ -596,9 +690,9 @@ export default function ApprendsPage() {
               {isLoadingSelectedLesson ? 'Cours...' : 'Cours'}
             </button>
           </div>
-          <div className="flex-1 flex overflow-hidden">
+          <div ref={mainContentRef} className="flex-1 flex overflow-hidden">
             {/* Writing column */}
-            <div className="flex-1 flex flex-col overflow-hidden border-r border-[var(--border-subtle)]">
+            <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${editorWidth}%` }}>
               <div className="px-6 py-4 border-b border-[var(--border-subtle)] overflow-y-auto max-h-64">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
@@ -693,9 +787,122 @@ export default function ApprendsPage() {
               )}
             </div>
 
+            {isDragging && (
+              <div className="fixed inset-0 z-50" style={{ cursor: 'col-resize' }} />
+            )}
+
+            <div
+              className="flex-shrink-0"
+              style={{
+                width: '12px',
+                height: '100%',
+                cursor: 'col-resize',
+                backgroundColor: isDragging ? 'var(--accent)' : 'var(--border-medium)',
+                position: 'relative',
+                zIndex: 10,
+                transition: 'background-color 0.15s',
+              }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setIsDragging(true);
+              }}
+              onMouseEnter={(event) => {
+                if (!isDragging) event.currentTarget.style.backgroundColor = 'var(--accent)';
+              }}
+              onMouseLeave={(event) => {
+                if (!isDragging) event.currentTarget.style.backgroundColor = 'var(--border-medium)';
+              }}
+              aria-label="Redimensionner les zones d'écriture et de retours"
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  width: '4px',
+                  height: '48px',
+                  transform: 'translate(-50%, -50%)',
+                  borderLeft: '2px dotted var(--text-muted)',
+                  borderRight: '2px dotted var(--text-muted)',
+                  pointerEvents: 'none',
+                }}
+              />
+            </div>
+
             {/* Feedback column */}
-            <div className="w-[26rem] flex-shrink-0 flex flex-col overflow-hidden">
+            <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${100 - editorWidth}%` }}>
+              <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-[var(--border-medium)] bg-[var(--bg-secondary)]" role="tablist" aria-label="Retours">
+                <button
+                  onClick={() => setFeedbackTab('latest')}
+                  className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${feedbackTab === 'latest' ? 'border-[var(--accent)] bg-[var(--accent)] text-[#172027] shadow-sm' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]'}`}
+                  role="tab"
+                  aria-selected={feedbackTab === 'latest'}
+                >
+                  Derniers avis
+                </button>
+                <button
+                  onClick={() => setFeedbackTab('history')}
+                  className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] ${feedbackTab === 'history' ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027] shadow-sm' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'}`}
+                  role="tab"
+                  aria-selected={feedbackTab === 'history'}
+                >
+                  Historique ({selected.commentHistory.length})
+                </button>
+              </div>
               <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+                {feedbackTab === 'history' ? (
+                  selected.commentHistory.length > 0 ? (
+                    [...selected.commentHistory].reverse().map(comment => (
+                      <div key={comment.id} className="border-b border-[var(--border-subtle)] pb-5 last:border-0">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <h2 className={`text-xs font-semibold tracking-widest uppercase ${comment.source === 'teacher' ? 'text-[var(--accent)]' : comment.source === 'author' ? 'text-[var(--accent-3)]' : 'text-[var(--text-primary)]'}`}>
+                            {comment.source === 'teacher' ? `Avis de ${teacherName}` : comment.source === 'author' ? `Avis de ${selected.authorName || 'l’auteur'}` : 'Avis des camarades'}
+                          </h2>
+                          <time className="text-xs text-[var(--text-muted)]" dateTime={new Date(comment.createdAt).toISOString()}>
+                            {new Date(comment.createdAt).toLocaleDateString('fr-FR')}
+                          </time>
+                        </div>
+                        <div className="critique-content">{renderMarkdown(comment.content)}</div>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedCommentVersions(previous => {
+                            const next = new Set(previous);
+                            if (next.has(comment.id)) next.delete(comment.id);
+                            else next.add(comment.id);
+                            return next;
+                          })}
+                          className={`mt-3 inline-flex max-w-full items-center rounded-md border px-3 py-2 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] ${expandedCommentVersions.has(comment.id) ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027]' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'}`}
+                          aria-expanded={expandedCommentVersions.has(comment.id)}
+                        >
+                          {expandedCommentVersions.has(comment.id) ? 'Masquer la version commentée' : 'Voir la version commentée'}
+                        </button>
+                        {expandedCommentVersions.has(comment.id) && (
+                          <div className="mt-3 rounded-md border border-[var(--border-medium)] bg-[var(--bg-surface)] p-3">
+                            <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+                              Version envoyée
+                            </div>
+                            {comment.textSnapshot ? (
+                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">
+                                {comment.textSnapshot}
+                              </p>
+                            ) : (
+                              <p className="text-sm italic text-[var(--text-muted)]">
+                                Cette ancienne entrée ne contient pas encore la version du texte commenté.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-[var(--text-muted)] text-center mt-10">
+                      Aucun ancien commentaire pour cet exercice.
+                    </p>
+                  )
+                ) : (
+                  <>
                 {selected.peerComments && (
                   <div>
                     <h2 className="text-[var(--text-muted)] text-xs font-semibold tracking-widest uppercase mb-2">
@@ -734,6 +941,8 @@ export default function ApprendsPage() {
                   <p className="text-sm text-[var(--text-muted)] text-center mt-10">
                     Écrivez votre texte puis demandez l&apos;avis de vos camarades ou du professeur.
                   </p>
+                )}
+                  </>
                 )}
               </div>
             </div>
