@@ -80,11 +80,29 @@ export interface ClassroomExercise {
   peerReviewTextSnapshot: string; // plain text submitted for peer review, to detect later edits ('' if none yet)
   teacherCritique: string; // latest teacher critique markdown ('' if none yet)
   lesson: string;          // tailored "le cours" markdown for this exercise ('' if not generated yet)
+  authorId: string;        // id from backend.auteurs.AUTHORS assigned to judge this exercise ('' if none)
+  authorName: string;      // display name of the assigned author ('' if none)
+  authorJudgment: string;  // latest judgment markdown from the assigned author ('' if none yet)
   synthesis: string;       // +/- synthesis added to the student's progress record once completed ('' if none yet)
   status: 'draft' | 'reviewed' | 'completed';
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type ClassroomExperienceLevel =
+  | 'grand_debutant'
+  | 'debutant'
+  | 'intermediaire'
+  | 'avance'
+  | 'ecrivain_publie';
+
+const CLASSROOM_EXPERIENCE_LEVELS: ClassroomExperienceLevel[] = [
+  'grand_debutant',
+  'debutant',
+  'intermediaire',
+  'avance',
+  'ecrivain_publie',
+];
 
 export const WB_CATEGORIES = [
   { id: 'monde', label: 'Monde', icon: '🌍' },
@@ -365,6 +383,19 @@ export async function saveLastClassroomExerciseId(id: string): Promise<void> {
   await db.put('settings', { key: 'lastClassroomExerciseId', value: id });
 }
 
+export async function getClassroomExperienceLevel(): Promise<ClassroomExperienceLevel> {
+  const db = await getDB();
+  const entry = await db.get('settings', 'classroomExperienceLevel');
+  return CLASSROOM_EXPERIENCE_LEVELS.includes(entry?.value as ClassroomExperienceLevel)
+    ? entry!.value as ClassroomExperienceLevel
+    : 'grand_debutant';
+}
+
+export async function saveClassroomExperienceLevel(level: ClassroomExperienceLevel): Promise<void> {
+  const db = await getDB();
+  await db.put('settings', { key: 'classroomExperienceLevel', value: level });
+}
+
 // Critiques
 export async function saveCritique(chapterId: string, reviewer: string, critique: string, textSnapshot: string): Promise<CritiqueEntry> {
   const db = await getDB();
@@ -565,7 +596,7 @@ export async function deleteTextVersionsBySource(sourceId: string): Promise<void
 // CLASSROOM ("J'apprends")
 // ==========================================
 
-export async function createClassroomExercise(title: string, promptMarkdown: string): Promise<ClassroomExercise> {
+export async function createClassroomExercise(title: string, promptMarkdown: string, authorId = '', authorName = ''): Promise<ClassroomExercise> {
   const db = await getDB();
   const exercise: ClassroomExercise = {
     id: crypto.randomUUID(),
@@ -576,6 +607,9 @@ export async function createClassroomExercise(title: string, promptMarkdown: str
     peerReviewTextSnapshot: '',
     teacherCritique: '',
     lesson: '',
+    authorId,
+    authorName,
+    authorJudgment: '',
     synthesis: '',
     status: 'draft',
     createdAt: new Date(),
@@ -589,7 +623,15 @@ export async function getClassroomExercises(): Promise<ClassroomExercise[]> {
   const db = await getDB();
   const all = await db.getAll('classroomExercises');
   return all
-    .map(e => ({ ...e, synthesis: e.synthesis ?? '', peerReviewTextSnapshot: e.peerReviewTextSnapshot ?? '', lesson: e.lesson ?? '' }))
+    .map(e => ({
+      ...e,
+      synthesis: e.synthesis ?? '',
+      peerReviewTextSnapshot: e.peerReviewTextSnapshot ?? '',
+      lesson: e.lesson ?? '',
+      authorId: e.authorId ?? '',
+      authorName: e.authorName ?? '',
+      authorJudgment: e.authorJudgment ?? '',
+    }))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
@@ -600,7 +642,7 @@ export async function getClassroomExercise(id: string): Promise<ClassroomExercis
 
 export async function updateClassroomExercise(
   id: string,
-  updates: Partial<Pick<ClassroomExercise, 'content' | 'peerComments' | 'peerReviewTextSnapshot' | 'teacherCritique' | 'lesson' | 'synthesis' | 'status'>>
+  updates: Partial<Pick<ClassroomExercise, 'content' | 'peerComments' | 'peerReviewTextSnapshot' | 'teacherCritique' | 'lesson' | 'authorJudgment' | 'synthesis' | 'status'>>
 ): Promise<void> {
   const db = await getDB();
   const exercise = await db.get('classroomExercises', id);

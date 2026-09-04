@@ -92,7 +92,7 @@ async def summarize_critiques(critiques: list[dict]) -> str:
     return response.choices[0].message.content
 
 
-async def stream_critique_from_mistral(text: str, prompt: str) -> AsyncGenerator[str, None]:
+async def stream_critique_from_mistral(text: str, prompt: str, model: str = MISTRAL_BEST_MODEL) -> AsyncGenerator[str, None]:
     client = get_mistral_client()
     user_content = (
         "[DÉBUT DU TEXTE À CRITIQUER]\n"
@@ -107,7 +107,7 @@ async def stream_critique_from_mistral(text: str, prompt: str) -> AsyncGenerator
     ]
     
     async for chunk in await client.chat.stream_async(
-        model=MISTRAL_BEST_MODEL,
+        model=model,
         messages=messages
     ):
         if chunk.data.choices[0].delta.content:

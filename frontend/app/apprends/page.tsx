@@ -10,6 +10,9 @@ import {
   deleteClassroomExercise,
   getLastClassroomExerciseId,
   saveLastClassroomExerciseId,
+  ClassroomExperienceLevel,
+  getClassroomExperienceLevel,
+  saveClassroomExperienceLevel,
 } from '../lib/db';
 import RichEditor, { EditorToolbar } from '../components/RichEditor';
 import type { Editor } from '@tiptap/react';
@@ -17,6 +20,14 @@ import type { Editor } from '@tiptap/react';
 const API_URL = 'http://localhost:8000';
 
 type Student = { id: string; name: string; age: number; background: string };
+
+const EXPERIENCE_LEVELS: { value: ClassroomExperienceLevel; label: string }[] = [
+  { value: 'grand_debutant', label: 'Grand débutant' },
+  { value: 'debutant', label: 'Débutant' },
+  { value: 'intermediaire', label: 'Intermédiaire' },
+  { value: 'avance', label: 'Avancé' },
+  { value: 'ecrivain_publie', label: 'Écrivain publié' },
+];
 
 // Extract plain text from HTML (for sending to API)
 const htmlToPlainText = (html: string): string => {
@@ -112,11 +123,20 @@ function extractField(markdown: string, label: string): string | null {
   return match ? match[1].trim() : null;
 }
 
+function getExerciseBody(markdown: string): string {
+  return markdown
+    .split('\n')
+    .filter(line => !/^(##\s+|\*\*(Type|Genre|Objectif pédagogique)\s*:\*\*)/i.test(line.trim()))
+    .join('\n')
+    .replace(/^\s*\n/, '');
+}
+
 export default function ApprendsPage() {
   const [exercises, setExercises] = useState<ClassroomExercise[]>([]);
   const [selected, setSelected] = useState<ClassroomExercise | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [teacherName, setTeacherName] = useState('Le Professeur');
+  const [experienceLevel, setExperienceLevel] = useState<ClassroomExperienceLevel>('grand_debutant');
 
   const [content, setContent] = useState('');
   const editorRef = useRef<Editor | null>(null);
@@ -125,6 +145,7 @@ export default function ApprendsPage() {
   const [isLoadingPeers, setIsLoadingPeers] = useState(false);
   const [isLoadingTeacher, setIsLoadingTeacher] = useState(false);
   const [showRecord, setShowRecord] = useState(false);
+  const [showClass, setShowClass] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exerciseProposals, setExerciseProposals] = useState<string[]>([]);
   const [openLessonIndex, setOpenLessonIndex] = useState<number | null>(null);
@@ -132,11 +153,17 @@ export default function ApprendsPage() {
   const [loadingLessonIndex, setLoadingLessonIndex] = useState<number | null>(null);
   const [showLesson, setShowLesson] = useState(false);
   const [isLoadingSelectedLesson, setIsLoadingSelectedLesson] = useState(false);
+  const [exerciseAuthors, setExerciseAuthors] = useState<{ id: string; name: string }[]>([]);
+  const [isLoadingAuthorJudgment, setIsLoadingAuthorJudgment] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const list = await getClassroomExercises();
+      const [list, savedExperienceLevel] = await Promise.all([
+        getClassroomExercises(),
+        getClassroomExperienceLevel(),
+      ]);
       setExercises(list);
+      setExperienceLevel(savedExperienceLevel);
       if (list.length > 0) {
         // Resume the exercise the student was last working on, not just the newest one
         const lastId = await getLastClassroomExerciseId();
@@ -172,6 +199,7 @@ export default function ApprendsPage() {
     setIsGeneratingExercise(true);
     setError(null);
     setExerciseProposals([]);
+    setExerciseAuthors([]);
     setOpenLessonIndex(null);
     setLessonTexts({});
     try {
@@ -181,11 +209,13 @@ export default function ApprendsPage() {
         body: JSON.stringify({
           previous_exercise_titles: exercises.map(e => e.title),
           past_syntheses: getPastSyntheses(),
+          experience_level: experienceLevel,
         }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setExerciseProposals(data.exercises || []);
+      setExerciseAuthors(data.authors || []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Impossible de générer des exercices.");
     } finally {
@@ -193,9 +223,9 @@ export default function ApprendsPage() {
     }
   };
 
-  const chooseExerciseProposal = async (markdown: string) => {
+  const chooseExerciseProposal = async (markdown: string, author?: { id: string; name: string }) => {
     const title = extractTitle(markdown);
-    const created = await createClassroomExercise(title, markdown);
+    const created = await createClassroomExercise(title, markdown, author?.id || '', author?.name || '');
     setExercises(prev => [created, ...prev]);
     selectExercise(created);
     setExerciseProposals([]);
@@ -211,7 +241,7 @@ export default function ApprendsPage() {
     try {
       await streamInto(
         `${API_URL}/classroom/lesson`,
-        { exercise_prompt: proposal },
+        { exercise_prompt: proposal, experience_level: experienceLevel },
         (text) => setLessonTexts(prev => ({ ...prev, [index]: text }))
       );
     } catch (e: unknown) {
@@ -232,7 +262,7 @@ export default function ApprendsPage() {
     try {
       const full = await streamInto(
         `${API_URL}/classroom/lesson`,
-        { exercise_prompt: selected.promptMarkdown },
+        { exercise_prompt: selected.promptMarkdown, experience_level: experienceLevel },
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, lesson: text } : e))
       );
       await updateClassroomExercise(selected.id, { lesson: full });
@@ -243,6 +273,34 @@ export default function ApprendsPage() {
       setShowLesson(false);
     } finally {
       setIsLoadingSelectedLesson(false);
+    }
+  };
+
+  const fetchAuthorJudgment = async () => {
+    if (!selected || !selected.authorId) return;
+    setIsLoadingAuthorJudgment(true);
+    setError(null);
+    try {
+      const plainText = htmlToPlainText(content);
+      const full = await streamInto(
+        `${API_URL}/classroom/author-judgment`,
+        {
+          text: plainText,
+          exercise_prompt: selected.promptMarkdown,
+          author_id: selected.authorId,
+          peer_comments: selected.peerComments || null,
+          teacher_critique: selected.teacherCritique || null,
+          experience_level: experienceLevel,
+        },
+        (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: text } : e))
+      );
+      await updateClassroomExercise(selected.id, { authorJudgment: full });
+      setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: full } : e));
+      setSelected(prev => prev ? { ...prev, authorJudgment: full } : prev);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "L'auteur n'a pas pu juger le texte.");
+    } finally {
+      setIsLoadingAuthorJudgment(false);
     }
   };
 
@@ -298,7 +356,7 @@ export default function ApprendsPage() {
     try {
       const full = await streamInto(
         `${API_URL}/classroom/peer-review`,
-        { text: plainText, exercise_prompt: selected.promptMarkdown, num_students: 5 },
+        { text: plainText, exercise_prompt: selected.promptMarkdown, num_students: 5, experience_level: experienceLevel },
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: text } : e))
       );
       await updateClassroomExercise(selected.id, { peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' });
@@ -330,6 +388,7 @@ export default function ApprendsPage() {
           on_demand: onDemand,
           past_syntheses: getPastSyntheses(selected.id),
           text_changed_since_peer_review: textChangedSincePeerReview,
+          experience_level: experienceLevel,
         },
         (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, teacherCritique: text } : e))
       );
@@ -340,7 +399,7 @@ export default function ApprendsPage() {
           const synthRes = await fetch(`${API_URL}/classroom/synthesize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ exercise_prompt: selected.promptMarkdown, critique: full }),
+            body: JSON.stringify({ exercise_prompt: selected.promptMarkdown, critique: full, experience_level: experienceLevel }),
           });
           const synthData = await synthRes.json();
           if (synthData.synthesis) synthesis = synthData.synthesis;
@@ -372,6 +431,24 @@ export default function ApprendsPage() {
         </div>
 
         <div className="px-4 pt-4 pb-3">
+          <label className="block mb-3">
+            <span className="block text-xs font-semibold tracking-widest uppercase text-[var(--text-muted)] mb-1.5">
+              Votre niveau
+            </span>
+            <select
+              value={experienceLevel}
+              onChange={(e) => {
+                const level = e.target.value as ClassroomExperienceLevel;
+                setExperienceLevel(level);
+                saveClassroomExperienceLevel(level).catch(() => {});
+              }}
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors focus:border-[var(--accent)]"
+            >
+              {EXPERIENCE_LEVELS.map(level => (
+                <option key={level.value} value={level.value}>{level.label}</option>
+              ))}
+            </select>
+          </label>
           <button
             onClick={handleNewExercise}
             disabled={isGeneratingExercise}
@@ -389,7 +466,7 @@ export default function ApprendsPage() {
               className={`group px-3 py-2.5 rounded-lg cursor-pointer transition-all flex items-start justify-between gap-2 ${selected?.id === ex.id ? 'bg-[var(--accent)]/10 border border-[var(--accent)]/30' : 'hover:bg-[var(--bg-surface)] border border-transparent'}`}
             >
               <div className="min-w-0">
-                <div className="text-sm text-[var(--text-primary)] truncate">{ex.title}</div>
+                <div className="text-sm text-[var(--text-primary)] leading-snug break-words" title={ex.title}>{ex.title}</div>
                 <div className="text-xs text-[var(--text-muted)] mt-0.5">
                   {ex.status === 'completed' ? '✅ Terminé' : ex.status === 'reviewed' ? '🧑‍🎓 Commenté' : '📝 Brouillon'}
                 </div>
@@ -435,25 +512,46 @@ export default function ApprendsPage() {
           )}
         </div>
 
-        {students.length > 0 && (
+        {selected?.authorName && (
           <div className="border-t border-[var(--border-subtle)] px-4 py-3">
             <h2 className="text-[var(--text-muted)] text-xs font-semibold tracking-widest uppercase mb-2">
-              La classe ({students.length} élèves)
+              Auteur invité
             </h2>
-            <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1">
-              {students.map(s => (
-                <div
-                  key={s.id}
-                  title={s.background}
-                  className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-lg bg-[var(--bg-surface)] cursor-default"
-                >
-                  <span className="w-5 h-5 flex-shrink-0 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold flex items-center justify-center">
-                    {s.name.charAt(0)}
-                  </span>
-                  <span className="text-xs text-[var(--text-secondary)] truncate">{s.name}</span>
-                </div>
-              ))}
+            <div className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-lg bg-[var(--bg-surface)] w-fit">
+              <span className="w-5 h-5 flex-shrink-0 rounded-full bg-[var(--accent-3)]/15 text-[var(--accent-3)] text-[10px] font-semibold flex items-center justify-center">
+                🖋️
+              </span>
+              <span className="text-xs text-[var(--text-secondary)]">{selected.authorName}</span>
             </div>
+          </div>
+        )}
+
+        {students.length > 0 && (
+          <div className="border-t border-[var(--border-subtle)] px-4 py-3">
+            <button
+              onClick={() => setShowClass(open => !open)}
+              className="w-full flex items-center justify-between text-[var(--text-muted)] hover:text-[var(--accent)] text-xs font-semibold tracking-widest uppercase transition-colors"
+              aria-expanded={showClass}
+            >
+              <span>La classe ({students.length} élèves)</span>
+              <span aria-hidden>{showClass ? '▲' : '▼'}</span>
+            </button>
+            {showClass && (
+              <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1 mt-2">
+                {students.map(s => (
+                  <div
+                    key={s.id}
+                    title={s.background}
+                    className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-lg bg-[var(--bg-surface)] cursor-default"
+                  >
+                    <span className="w-5 h-5 flex-shrink-0 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold flex items-center justify-center">
+                      {s.name.charAt(0)}
+                    </span>
+                    <span className="text-xs text-[var(--text-secondary)] truncate">{s.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -470,22 +568,67 @@ export default function ApprendsPage() {
             </div>
           </div>
         ) : (
+          <>
+          <div className="flex-shrink-0 min-h-16 px-6 py-2 bg-[var(--bg-secondary)] border-b border-[var(--border-medium)] flex items-center gap-2" role="tablist" aria-label="Atelier">
+            <button
+              onClick={() => setShowLesson(false)}
+              className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
+                !showLesson
+                  ? 'border-[var(--accent)] bg-[var(--accent)] text-[#172027] shadow-sm'
+                  : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]'
+              }`}
+              aria-selected={!showLesson}
+              role="tab"
+            >
+              Exos
+            </button>
+            <button
+              onClick={() => { if (!showLesson || !selected.lesson) fetchSelectedLesson(); }}
+              disabled={isLoadingSelectedLesson}
+              className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 ${
+                showLesson
+                  ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027] shadow-sm'
+                  : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'
+              }`}
+              aria-selected={showLesson}
+              role="tab"
+            >
+              {isLoadingSelectedLesson ? 'Cours...' : 'Cours'}
+            </button>
+          </div>
           <div className="flex-1 flex overflow-hidden">
             {/* Writing column */}
             <div className="flex-1 flex flex-col overflow-hidden border-r border-[var(--border-subtle)]">
               <div className="px-6 py-4 border-b border-[var(--border-subtle)] overflow-y-auto max-h-64">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">{renderMarkdown(selected.promptMarkdown)}</div>
-                  <button
-                    onClick={fetchSelectedLesson}
-                    disabled={isLoadingSelectedLesson}
-                    className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--accent-3)]/50 hover:text-[var(--accent-3)] transition-all disabled:opacity-50"
-                  >
-                    {isLoadingSelectedLesson ? '⏳' : showLesson ? '📚 Masquer le cours' : '📚 Le cours'}
-                  </button>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <h1 className="text-xl font-semibold text-[var(--text-primary)] leading-snug">
+                      {extractTitle(selected.promptMarkdown)}
+                    </h1>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {extractField(selected.promptMarkdown, 'Type') && (
+                        <span className="px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold uppercase tracking-wide">
+                          {extractField(selected.promptMarkdown, 'Type')}
+                        </span>
+                      )}
+                      {extractField(selected.promptMarkdown, 'Genre') && (
+                        <span className="px-2 py-0.5 rounded-full bg-[var(--accent-3)]/15 text-[var(--accent-3)] text-[10px] font-semibold uppercase tracking-wide">
+                          {extractField(selected.promptMarkdown, 'Genre')}
+                        </span>
+                      )}
+                    </div>
+                    {extractField(selected.promptMarkdown, 'Objectif pédagogique') && (
+                      <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                        {extractField(selected.promptMarkdown, 'Objectif pédagogique')}
+                      </p>
+                    )}
+                    {!showLesson && (
+                      <div className="mt-4">{renderMarkdown(getExerciseBody(selected.promptMarkdown))}</div>
+                    )}
+                  </div>
                 </div>
                 {showLesson && (
-                  <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+                  <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]" role="tabpanel">
                     {isLoadingSelectedLesson && !selected.lesson ? (
                       <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
                     ) : (
@@ -516,24 +659,34 @@ export default function ApprendsPage() {
                 <button
                   onClick={handlePeerReview}
                   disabled={isLoadingPeers || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/10 text-[var(--text-primary)] text-sm font-medium border border-[var(--border-subtle)] transition-all ${isLoadingPeers ? 'opacity-50 cursor-wait' : ''}`}
+                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--text-primary)] text-sm font-semibold border border-[var(--border-medium)] hover:border-[var(--accent)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingPeers ? 'cursor-wait' : ''}`}
                 >
                   {isLoadingPeers ? '⏳ Les élèves lisent…' : '🧑‍🎓 Avis des camarades'}
                 </button>
                 <button
                   onClick={() => askTeacher(true)}
                   disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/10 text-[var(--text-primary)] text-sm font-medium border border-[var(--border-subtle)] transition-all ${isLoadingTeacher ? 'opacity-50 cursor-wait' : ''}`}
+                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent-3)]/15 text-[var(--text-primary)] text-sm font-semibold border border-[var(--border-medium)] hover:border-[var(--accent-3)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
                 >
                   🧑‍🏫 Demander de l&apos;aide au prof
                 </button>
                 <button
                   onClick={() => askTeacher(false)}
                   disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2 rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-sm font-medium border border-[var(--accent)]/30 transition-all ${isLoadingTeacher ? 'opacity-50 cursor-wait' : ''}`}
+                  className={`px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[#181326] text-sm font-bold border border-[var(--accent)] hover:bg-[#d0c4ff] transition-all shadow-[0_4px_16px_rgba(185,167,255,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
                 >
                   {isLoadingTeacher ? '⏳ Correction en cours…' : '✅ Terminer (avis du prof)'}
                 </button>
+                {selected.authorId && (
+                  <button
+                    onClick={fetchAuthorJudgment}
+                    disabled={isLoadingAuthorJudgment || !htmlToPlainText(content).trim()}
+                    title={`${selected.authorName} juge votre texte, avec sa vraie personnalité et son style`}
+                    className={`px-4 py-2 rounded-lg bg-[var(--accent-3)]/10 hover:bg-[var(--accent-3)]/20 text-[var(--accent-3)] text-sm font-medium border border-[var(--accent-3)]/30 transition-all ${isLoadingAuthorJudgment ? 'opacity-50 cursor-wait' : ''}`}
+                  >
+                    {isLoadingAuthorJudgment ? '⏳ …' : `🖋️ Avis de ${selected.authorName}`}
+                  </button>
+                )}
               </div>
               {error && (
                 <div className="px-6 pb-4 text-sm text-red-400">{error}</div>
@@ -559,6 +712,14 @@ export default function ApprendsPage() {
                     <div className="critique-content">{renderMarkdown(selected.teacherCritique)}</div>
                   </div>
                 )}
+                {selected.authorJudgment && (
+                  <div>
+                    <h2 className="text-[var(--accent-3)] text-xs font-semibold tracking-widest uppercase mb-2">
+                      🖋️ Jugement de {selected.authorName}
+                    </h2>
+                    <div className="critique-content">{renderMarkdown(selected.authorJudgment)}</div>
+                  </div>
+                )}
                 {selected.synthesis && (
                   <div>
                     <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
@@ -569,7 +730,7 @@ export default function ApprendsPage() {
                     </div>
                   </div>
                 )}
-                {!selected.peerComments && !selected.teacherCritique && (
+                {!selected.peerComments && !selected.teacherCritique && !selected.authorJudgment && (
                   <p className="text-sm text-[var(--text-muted)] text-center mt-10">
                     Écrivez votre texte puis demandez l&apos;avis de vos camarades ou du professeur.
                   </p>
@@ -577,6 +738,7 @@ export default function ApprendsPage() {
               </div>
             </div>
           </div>
+          </>
         )}
       </div>
 
@@ -591,9 +753,9 @@ export default function ApprendsPage() {
               <h3 className="font-display gradient-text font-bold text-base">🎓 {teacherName} vous propose 3 exercices</h3>
               <button onClick={() => setExerciseProposals([])} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg transition-colors">✕</button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="exercise-proposals-grid flex-1 overflow-y-auto p-5">
               {exerciseProposals.map((proposal, i) => (
-                <div key={i} className="card-modern rounded-2xl p-4 flex flex-col overflow-hidden">
+                <div key={i} className="card-modern rounded-lg p-4 flex min-h-[22rem] flex-col overflow-hidden">
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {extractField(proposal, 'Type') && (
                       <span className="px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold uppercase tracking-wide">
@@ -603,6 +765,11 @@ export default function ApprendsPage() {
                     {extractField(proposal, 'Genre') && (
                       <span className="px-2 py-0.5 rounded-full bg-[var(--accent-3)]/15 text-[var(--accent-3)] text-[10px] font-semibold uppercase tracking-wide">
                         {extractField(proposal, 'Genre')}
+                      </span>
+                    )}
+                    {exerciseAuthors[i] && (
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--accent-2)]/15 text-[var(--accent-2)] text-[10px] font-semibold">
+                        🖋️ Jugé par {exerciseAuthors[i].name}
                       </span>
                     )}
                   </div>
@@ -618,16 +785,16 @@ export default function ApprendsPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-2 mt-3 flex-shrink-0">
+                  <div className="flex gap-2 mt-4 flex-shrink-0">
                     <button
                       onClick={() => fetchLesson(i, proposal)}
-                      className="flex-1 py-2 rounded-lg text-sm font-medium border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--accent-3)]/50 hover:text-[var(--accent-3)] transition-all"
+                      className="px-3 py-2 rounded-md text-sm font-semibold border border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--accent-3)]/50 hover:text-[var(--accent-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] transition-all"
                     >
                       {loadingLessonIndex === i ? '⏳' : openLessonIndex === i ? '📚 Masquer' : '📚 Le cours'}
                     </button>
                     <button
-                      onClick={() => chooseExerciseProposal(proposal)}
-                      className="btn-accent flex-1 py-2 rounded-lg text-sm"
+                      onClick={() => chooseExerciseProposal(proposal, exerciseAuthors[i])}
+                      className="ml-auto px-4 py-2 rounded-md bg-[var(--accent)] text-[#181326] text-sm font-bold hover:bg-[#d0c4ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] transition-colors"
                     >
                       Choisir cet exercice
                     </button>

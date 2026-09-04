@@ -4,11 +4,15 @@ from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
 import re
-from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest
+from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest, ClassroomAuthorJudgmentRequest
 from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages, get_structured_comments, generate_text_from_mistral
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 from backend.students import STUDENTS, STUDENT_IDS, TEACHER_NAME, TEACHER_PROMPT, get_students_list
-from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
+from backend.auteurs import AUTHORS, get_author_for_genre
+from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL
+from backend.anthropic_utils import stream_critique_from_anthropic
+from backend.openai_utils import stream_critique_from_openai
+from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, AUTHOR_JUDGMENT_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
 
 load_dotenv()
 
@@ -33,8 +37,20 @@ async def ping():
 
 @app.get("/config")
 async def get_config():
-    mistral_api_key = os.getenv("MISTRAL_API_KEY")
-    return {"mistral_api_key_set": bool(mistral_api_key)}
+    return {
+        "mistral_api_key_set": bool(os.getenv("MISTRAL_API_KEY")),
+        "anthropic_api_key_set": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "openai_api_key_set": bool(os.getenv("OPENAI_API_KEY")),
+    }
+
+
+# Choisit le meilleur fournisseur dispo (clé API présente), avec repli sur Mistral en dernier recours.
+def _pick_provider(preferred: list[tuple[str, callable, str]]):
+    for env_var, stream_fn, model in preferred:
+        if os.getenv(env_var):
+            return stream_fn, model
+    fallback = preferred[-1]
+    return fallback[1], fallback[2]
 
 @app.get("/reviewers")
 async def get_reviewers():
@@ -879,6 +895,44 @@ async def classroom_students():
     return {"teacher": {"name": TEACHER_NAME}, "students": get_students_list()}
 
 
+_CLASSROOM_EXPERIENCE_CONTEXTS = {
+    "grand_debutant": (
+        "Grand débutant", 1,
+        "Privilégie une seule compétence à la fois, des consignes très claires et des contraintes simples. "
+        "Explique les termes techniques et valorise avant tout l'élan, la compréhension de la consigne et les progrès visibles."
+    ),
+    "debutant": (
+        "Débutant", 2,
+        "Propose des exercices accessibles avec une technique identifiable et peu de contraintes cumulées. "
+        "Les retours doivent rester très concrets, pédagogiques et proposer une priorité d'amélioration à la fois."
+    ),
+    "intermediaire": (
+        "Intermédiaire", 3,
+        "Propose des exercices qui demandent de maîtriser une technique narrative ou stylistique. "
+        "Les retours peuvent employer le vocabulaire d'atelier en l'explicitant et doivent relever les choix de structure, de voix et de rythme."
+    ),
+    "avance": (
+        "Avancé", 4,
+        "Propose des exercices ambitieux à contraintes croisées, qui demandent une intention littéraire consciente. "
+        "Les retours doivent être précis et exigeants sur la maîtrise du style, de la structure et des effets produits."
+    ),
+    "ecrivain_publie": (
+        "Écrivain publié", 5,
+        "Propose des exercices de haut niveau, formellement ambitieux et proches d'un travail de publication. "
+        "Les retours doivent être francs, rigoureux et éditoriaux, en questionnant la singularité, la cohérence d'ensemble et l'impact sur le lecteur."
+    ),
+}
+
+
+def _build_experience_context(experience_level: str) -> str:
+    """Décrit le niveau de l'élève pour adapter chaque interaction de l'atelier."""
+    label, difficulty, guidance = _CLASSROOM_EXPERIENCE_CONTEXTS[experience_level]
+    return (
+        f"NIVEAU D'EXPÉRIENCE DE L'ÉLÈVE : {label} (difficulté cible {difficulty}/5).\n"
+        f"ADAPTATION PÉDAGOGIQUE OBLIGATOIRE : {guidance}"
+    )
+
+
 def _build_student_record(past_syntheses: list[dict] | None) -> str:
     """Formate le carnet de suivi de l'élève à partir des synthèses des exercices précédents."""
     if not past_syntheses:
@@ -906,9 +960,11 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
             f"(autre thème, autre type d'exercice, autre genre) :\n{titles}"
         )
     student_record = _build_student_record(request.past_syntheses)
+    experience_context = _build_experience_context(request.experience_level)
     system_prompt = EXERCISE_GENERATION_PROMPT.format(
         teacher_name=TEACHER_NAME,
         teacher_personality=TEACHER_PROMPT,
+        experience_context=experience_context,
         avoid_repeats=avoid_repeats,
         student_record=student_record,
     )
@@ -920,7 +976,12 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
     exercises = [p.strip() for p in parts if p.strip()]
     if not exercises:
         exercises = [raw.strip()]
-    return {"exercises": exercises}
+    authors = []
+    for ex in exercises:
+        genre_match = re.search(r"\*\*Genre\s*:\*\*\s*(.+)", ex, re.IGNORECASE)
+        author_id = get_author_for_genre(genre_match.group(1) if genre_match else None)
+        authors.append({"id": author_id, "name": AUTHORS[author_id]["name"]})
+    return {"exercises": exercises, "authors": authors}
 
 
 @app.post("/classroom/lesson")
@@ -929,10 +990,47 @@ async def classroom_lesson(request: ClassroomLessonRequest):
     system_prompt = LESSON_PROMPT.format(
         teacher_name=TEACHER_NAME,
         teacher_personality=TEACHER_PROMPT,
+        experience_context=_build_experience_context(request.experience_level),
         exercise_prompt=request.exercise_prompt,
     )
     return StreamingResponse(
         stream_from_mistral_small(system_prompt, "Donne-moi le cours pour me préparer à cet exercice."),
+        media_type="text/plain"
+    )
+
+
+@app.post("/classroom/author-judgment")
+async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
+    """Un grand auteur (réel, passé ou présent) juge le travail de l'élève avec sa vraie personnalité."""
+    author = AUTHORS.get(request.author_id)
+    if not author:
+        async def error_stream():
+            yield "Auteur inconnu."
+        return StreamingResponse(error_stream(), media_type="text/plain")
+
+    peer_context = ""
+    if request.peer_comments:
+        peer_context += f"AVIS DES CAMARADES DE CLASSE :\n{request.peer_comments}\n\n"
+    if request.teacher_critique:
+        peer_context += f"AVIS DU PROFESSEUR {TEACHER_NAME} :\n{request.teacher_critique}\n\n"
+
+    system_prompt = AUTHOR_JUDGMENT_PROMPT.format(
+        author_name=author["name"],
+        author_era=author["era"],
+        teacher_name=TEACHER_NAME,
+        exercise_prompt=request.exercise_prompt,
+        experience_context=_build_experience_context(request.experience_level),
+        author_personality=author["personality"],
+        peer_context=peer_context,
+    )
+    # L'auteur est le rôle le plus exigeant en fidélité stylistique : on préfère Opus, puis GPT, puis Mistral.
+    stream_fn, model = _pick_provider([
+        ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_BEST_MODEL),
+        ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_BEST_MODEL),
+        ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_BEST_MODEL),
+    ])
+    return StreamingResponse(
+        stream_fn(request.text, system_prompt, model=model),
         media_type="text/plain"
     )
 
@@ -961,6 +1059,7 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
     panel_system = STUDENTS_PANEL_PROMPT.format(
         nb_students=len(chosen),
         exercise_prompt=request.exercise_prompt,
+        experience_context=_build_experience_context(request.experience_level),
         students_list=students_list,
         students_personalities=students_personalities,
     )
@@ -969,7 +1068,8 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
 
     async def stream_with_header():
         yield f"*🧑‍🎓 {', '.join(chosen_names)} lisent votre texte…*\n\n---\n\n"
-        async for chunk in stream_critique_from_mistral(request.text, panel_system):
+        # Le panel d'élèves n'a pas besoin du modèle le plus coûteux : dialogues courts et casual.
+        async for chunk in stream_critique_from_mistral(request.text, panel_system, model=MISTRAL_MEDIUM_MODEL):
             yield chunk
 
     return StreamingResponse(
@@ -999,13 +1099,19 @@ async def classroom_teacher_critique(request: ClassroomTeacherRequest):
     system_prompt = TEACHER_CRITIQUE_PROMPT.format(
         teacher_name=TEACHER_NAME,
         teacher_personality=TEACHER_PROMPT,
+        experience_context=_build_experience_context(request.experience_level),
         exercise_prompt=request.exercise_prompt,
         mode_instructions=mode_instructions,
         student_record=student_record,
     )
 
+    stream_fn, model = _pick_provider([
+        ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
+        ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
+        ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_MEDIUM_MODEL),
+    ])
     return StreamingResponse(
-        stream_critique_from_mistral(request.text, system_prompt),
+        stream_fn(request.text, system_prompt, model=model),
         media_type="text/plain"
     )
 
@@ -1016,6 +1122,7 @@ async def classroom_synthesize(request: ClassroomSynthesisRequest):
     system_prompt = SYNTHESIS_PROMPT.format(
         teacher_name=TEACHER_NAME,
         teacher_personality=TEACHER_PROMPT,
+        experience_context=_build_experience_context(request.experience_level),
         exercise_prompt=request.exercise_prompt,
         critique=request.critique,
     )

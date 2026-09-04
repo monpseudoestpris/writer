@@ -25,4 +25,5 @@ services:
     working_dir: /app/frontend
     environment:
       - CI=true
+      - NODE_ENV=development
     command: sh -c "pnpm install && pnpm dev"

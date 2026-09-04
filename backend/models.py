@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 
 class ReviewRequest(BaseModel):
     text: str
@@ -138,13 +138,33 @@ class RewriteRequest(BaseModel):
 # CLASSE D'ÉCRITURE CRÉATIVE ("J'apprends")
 # ==========================================
 
+ClassroomExperienceLevel = Literal[
+    "grand_debutant",
+    "debutant",
+    "intermediaire",
+    "avance",
+    "ecrivain_publie",
+]
+
+
 class ClassroomExerciseRequest(BaseModel):
     previous_exercise_titles: Optional[list[str]] = None  # to avoid repeats
     past_syntheses: Optional[list[dict]] = None  # [{title, synthesis}] from the student's progress record
+    experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
 class ClassroomLessonRequest(BaseModel):
     exercise_prompt: str  # the proposed exercise markdown, to tailor the lesson to its type/genre
+    experience_level: ClassroomExperienceLevel = "grand_debutant"
+
+
+class ClassroomAuthorJudgmentRequest(BaseModel):
+    text: str
+    exercise_prompt: str
+    author_id: str  # id from backend.auteurs.AUTHORS, assigned to this exercise
+    peer_comments: Optional[str] = None
+    teacher_critique: Optional[str] = None
+    experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
 class ClassroomPeerReviewRequest(BaseModel):
@@ -152,6 +172,7 @@ class ClassroomPeerReviewRequest(BaseModel):
     exercise_prompt: str
     num_students: int = 5
     student_ids: Optional[list[str]] = None  # force specific students instead of random pick
+    experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
 class ClassroomTeacherRequest(BaseModel):
@@ -161,10 +182,12 @@ class ClassroomTeacherRequest(BaseModel):
     on_demand: bool = False  # True if the student asks for help mid-exercise
     past_syntheses: Optional[list[dict]] = None  # [{title, synthesis}] from the student's progress record
     text_changed_since_peer_review: bool = False  # True if the student edited the text after peer review
+    experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
 class ClassroomSynthesisRequest(BaseModel):
     exercise_prompt: str
     critique: str  # the teacher's final critique to summarize into the progress record
+    experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 

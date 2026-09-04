@@ -1,25 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Source+Sans+3:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
-
 :root {
-  --bg-primary: #0a0a12;
-  --bg-secondary: #101018;
-  --bg-elevated: #16161f;
-  --bg-surface: #1b1b2a;
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-medium: rgba(255, 255, 255, 0.14);
-  --accent: #8b5cf6;
-  --accent-2: #ec4899;
-  --accent-3: #22d3ee;
-  --accent-soft: rgba(139, 92, 246, 0.16);
-  --accent-glow: rgba(139, 92, 246, 0.12);
-  --gradient-accent: linear-gradient(135deg, var(--accent-3), var(--accent) 55%, var(--accent-2));
-  --text-primary: #f2f0fb;
-  --text-secondary: #a9a4c4;
-  --text-muted: #605c80;
+  --bg-primary: #17191f;
+  --bg-secondary: #20232b;
+  --bg-elevated: #292d37;
+  --bg-surface: #323744;
+  --border-subtle: rgba(255, 255, 255, 0.14);
+  --border-medium: rgba(255, 255, 255, 0.24);
+  --accent: #8de1ed;
+  --accent-2: #ff9b7a;
+  --accent-3: #b7d4ff;
+  --accent-soft: rgba(141, 225, 237, 0.16);
+  --accent-glow: rgba(141, 225, 237, 0.12);
+  --gradient-accent: var(--accent);
+  --text-primary: #ffffff;
+  --text-secondary: #e2e6ee;
+  --text-muted: #c2c9d4;
 }
 
 html, body {
@@ -27,8 +27,8 @@ html, body {
   padding: 0;
   height: 100%;
   overflow: hidden;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 18px;
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  font-size: 16px;
   background: var(--bg-primary);
 }
 
@@ -42,10 +42,7 @@ body::before {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(38rem 26rem at 12% -8%, rgba(139, 92, 246, 0.16), transparent 60%),
-    radial-gradient(30rem 24rem at 108% 8%, rgba(236, 72, 153, 0.12), transparent 60%),
-    radial-gradient(26rem 22rem at 50% 118%, rgba(34, 211, 238, 0.08), transparent 60%);
+  background: #17191f;
 }
 
 #__next, body > div {
@@ -54,17 +51,12 @@ body::before {
 }
 
 .font-display {
-  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
-  letter-spacing: -0.01em;
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  letter-spacing: 0;
 }
 
 .gradient-text {
-  background: var(--gradient-accent);
-  background-size: 200% 200%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: gradientShift 6s ease infinite;
+  color: var(--text-primary);
 }
 
 @keyframes gradientShift {
@@ -160,14 +152,14 @@ body::before {
   font-style: italic;
 }
 
-/* Dark colors for headings inside paper editor */
-.editor-area .tiptap h1 { color: #171225; }
-.editor-area .tiptap h2 { color: #5b3e8f; }
-.editor-area .tiptap h3 { color: #3a3a3a; }
-.editor-area .tiptap blockquote { color: #444; border-left-color: #8b5cf6; }
-.editor-area .tiptap strong, .editor-area .tiptap b { color: #171225; }
-.editor-area .tiptap hr { border-top-color: rgba(0, 0, 0, 0.15); }
-.editor-area .tiptap p.is-editor-empty:first-child::before { color: #999; }
+/* High-contrast colors inside the shared dark editor */
+.editor-area .tiptap h1 { color: #f7f5ff; }
+.editor-area .tiptap h2 { color: #c9bdff; }
+.editor-area .tiptap h3 { color: #aeeeff; }
+.editor-area .tiptap blockquote { color: #d1cce2; border-left-color: #b9a7ff; }
+.editor-area .tiptap strong, .editor-area .tiptap b { color: #ffffff; }
+.editor-area .tiptap hr { border-top-color: rgba(255, 255, 255, 0.14); }
+.editor-area .tiptap p.is-editor-empty:first-child::before { color: #aaa4c0; }
 
 /* Highlight for diff changes in editor */
 .editor-area .tiptap mark,
@@ -232,9 +224,8 @@ body::before {
   font-family: 'Lora', Georgia, 'Times New Roman', serif;
   line-height: 1.85;
   letter-spacing: 0.01em;
-  background: url('/paper.png') repeat;
-  background-size: auto;
-  color: #1a1a1a;
+  background: #1e1e26;
+  color: #e8e5f0;
 }
 
 /* Ensure EditorContent and .tiptap fill the editor-area container */
@@ -242,6 +233,18 @@ body::before {
 .editor-area > div > .tiptap {
   min-height: 100%;
   height: 100%;
+}
+
+.exercise-proposals-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@media (min-width: 900px) {
+  .exercise-proposals-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* Critique / feedback panel background */
