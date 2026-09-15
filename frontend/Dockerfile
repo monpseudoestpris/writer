@@ -4,17 +4,15 @@ FROM node:20-alpine AS builder
 # Set the working directory
 WORKDIR /app/frontend
 
-# Install pnpm globally and ensure its bin is in PATH
+# Install pnpm globally, configure PATH and disable minimum-release-age policy
 RUN npm install -g pnpm && \
-    export PATH="$(npm root -g)/.bin:$PATH"
+    export PATH="$(npm root -g)/.bin:$PATH" && \
+    pnpm config set minimum-release-age 0 --location=global
 
-# Copy package.json, pnpm-lock.yaml and .npmrc
+# Copy package.json and pnpm-lock.yaml
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
-# Install dependencies using pnpm.
-# --ignore-scripts: skip dependency build scripts without failing the install.
-# Prebuilt binaries for sharp/unrs-resolver (linuxmusl) are pulled via
-# optionalDependencies, so no native compilation is needed in the image.
+# Install dependencies using pnpm
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy the rest of the application code
@@ -33,7 +31,7 @@ RUN npm install -g pnpm && \
     export PATH="$(npm root -g)/.bin:$PATH"
 
 # Set environment variables for Next.js
-ENV NODE_ENV production
+ENV NODE_ENV=production
 
 # Copy necessary files from the builder stage
 COPY --from=builder /app/frontend/public ./public
