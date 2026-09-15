@@ -66,13 +66,13 @@ function renderMarkdown(text: string): ReactNode[] {
       const level = heading[1].length;
       if (level <= 2) {
         return (
-          <h2 key={i} className="text-lg font-semibold text-[var(--text-primary)] mb-3 mt-4 first:mt-0 pb-2 border-b border-[var(--border-subtle)]">
-            {renderInline(heading[2])}
-          </h2>
+          <h2 key={i} className="text-xl font-semibold text-[var(--text-primary)] mb-3 mt-4 first:mt-0 pb-2 border-b border-[var(--border-subtle)]">
+              {renderInline(heading[2])}
+            </h2>
         );
       }
       return (
-        <h3 key={i} className="text-[15px] font-semibold text-[var(--accent)] mt-4 mb-2">
+        <h3 key={i} className="text-[17px] font-semibold text-[var(--accent)] mt-4 mb-2">
           {renderInline(heading[2])}
         </h3>
       );
@@ -88,7 +88,7 @@ function renderMarkdown(text: string): ReactNode[] {
 
     if (line.startsWith('- ') || line.startsWith('• ')) {
       return (
-        <div key={i} className="flex gap-2 my-1 ml-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+        <div key={i} className="flex gap-2 my-1 ml-2 text-base leading-relaxed text-[var(--text-secondary)]">
           <span className="text-[var(--accent)] mt-0.5 flex-shrink-0">•</span>
           <span>{renderInline(line.slice(2))}</span>
         </div>
@@ -107,7 +107,7 @@ function renderMarkdown(text: string): ReactNode[] {
     }
 
     return (
-      <p key={i} className="text-[var(--text-secondary)] text-sm leading-relaxed my-1.5">
+      <p key={i} className="text-[var(--text-secondary)] text-base leading-relaxed my-1.5">
         {renderInline(rawLine)}
       </p>
     );
@@ -489,7 +489,7 @@ export default function ApprendsPage() {
       {/* Sidebar */}
       <div className="flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden" style={{ width: `${sidebarWidth}px` }}>
         <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-          <h1 className="font-display gradient-text font-bold text-base tracking-tight">🎓 J&apos;apprends</h1>
+          <h1 className="font-display gradient-text font-bold text-lg tracking-tight">🎓 J&apos;apprends</h1>
           <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
             ← Accueil
           </Link>
@@ -517,7 +517,7 @@ export default function ApprendsPage() {
           <button
             onClick={handleNewExercise}
             disabled={isGeneratingExercise}
-            className={`w-full px-3 py-2 rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-sm font-medium transition-all ${isGeneratingExercise ? 'opacity-50 cursor-wait' : ''}`}
+            className={`w-full px-3 py-2 rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-base font-medium transition-all ${isGeneratingExercise ? 'opacity-50 cursor-wait' : ''}`}
           >
             {isGeneratingExercise ? '⏳ Le prof réfléchit…' : '+ Nouvel exercice'}
           </button>
@@ -531,8 +531,8 @@ export default function ApprendsPage() {
               className={`group px-3 py-2.5 rounded-lg cursor-pointer transition-all flex items-start justify-between gap-2 ${selected?.id === ex.id ? 'bg-[var(--accent)]/10 border border-[var(--accent)]/30' : 'hover:bg-[var(--bg-surface)] border border-transparent'}`}
             >
               <div className="min-w-0">
-                <div className="text-sm text-[var(--text-primary)] leading-snug break-words" title={ex.title}>{ex.title}</div>
-                <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                <div className="text-base text-[var(--text-primary)] leading-snug break-words" title={ex.title}>{ex.title}</div>
+                <div className="text-sm text-[var(--text-muted)] mt-0.5">
                   {ex.status === 'completed' ? '✅ Terminé' : ex.status === 'reviewed' ? '🧑‍🎓 Commenté' : '📝 Brouillon'}
                 </div>
               </div>
@@ -663,31 +663,23 @@ export default function ApprendsPage() {
           </div>
         ) : (
           <>
-          <div className="flex-shrink-0 min-h-16 px-6 py-2 bg-[var(--bg-secondary)] border-b border-[var(--border-medium)] flex items-center gap-2" role="tablist" aria-label="Atelier">
+          <div className="flex-shrink-0 px-6 py-3 bg-[var(--bg-secondary)] border-b border-[var(--border-medium)] flex items-center gap-2" role="tablist" aria-label="Atelier">
             <button
               onClick={() => setShowLesson(false)}
-              className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
-                !showLesson
-                  ? 'border-[var(--accent)] bg-[var(--accent)] text-[#172027] shadow-sm'
-                  : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]'
-              }`}
+              className={`workshop-tab ${!showLesson ? 'workshop-tab-active' : ''}`}
               aria-selected={!showLesson}
               role="tab"
             >
-              Exos
+              ✍️ Exos
             </button>
             <button
               onClick={() => { if (!showLesson || !selected.lesson) fetchSelectedLesson(); }}
               disabled={isLoadingSelectedLesson}
-              className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 ${
-                showLesson
-                  ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027] shadow-sm'
-                  : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'
-              }`}
+              className={`workshop-tab workshop-tab-cours ${showLesson ? 'workshop-tab-active' : ''} ${isLoadingSelectedLesson ? 'opacity-60 cursor-wait' : ''}`}
               aria-selected={showLesson}
               role="tab"
             >
-              {isLoadingSelectedLesson ? 'Cours...' : 'Cours'}
+              {isLoadingSelectedLesson ? '⏳ Cours…' : '📚 Cours'}
             </button>
           </div>
           <div ref={mainContentRef} className="flex-1 flex overflow-hidden">
@@ -696,7 +688,7 @@ export default function ApprendsPage() {
               <div className="px-6 py-4 border-b border-[var(--border-subtle)] overflow-y-auto max-h-64">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <h1 className="text-xl font-semibold text-[var(--text-primary)] leading-snug">
+                    <h1 className="text-2xl font-semibold text-[var(--text-primary)] leading-snug">
                       {extractTitle(selected.promptMarkdown)}
                     </h1>
                     <div className="flex flex-wrap gap-1.5 mt-2">
@@ -712,7 +704,7 @@ export default function ApprendsPage() {
                       )}
                     </div>
                     {extractField(selected.promptMarkdown, 'Objectif pédagogique') && (
-                      <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                      <p className="mt-2 text-base leading-relaxed text-[var(--text-secondary)]">
                         {extractField(selected.promptMarkdown, 'Objectif pédagogique')}
                       </p>
                     )}
@@ -753,21 +745,21 @@ export default function ApprendsPage() {
                 <button
                   onClick={handlePeerReview}
                   disabled={isLoadingPeers || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--text-primary)] text-sm font-semibold border border-[var(--border-medium)] hover:border-[var(--accent)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingPeers ? 'cursor-wait' : ''}`}
+                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingPeers ? 'cursor-wait' : ''}`}
                 >
                   {isLoadingPeers ? '⏳ Les élèves lisent…' : '🧑‍🎓 Avis des camarades'}
                 </button>
                 <button
                   onClick={() => askTeacher(true)}
                   disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent-3)]/15 text-[var(--text-primary)] text-sm font-semibold border border-[var(--border-medium)] hover:border-[var(--accent-3)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
+                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent-3)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent-3)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
                 >
                   🧑‍🏫 Demander de l&apos;aide au prof
                 </button>
                 <button
                   onClick={() => askTeacher(false)}
                   disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[#181326] text-sm font-bold border border-[var(--accent)] hover:bg-[#d0c4ff] transition-all shadow-[0_4px_16px_rgba(185,167,255,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
+                  className={`px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[#181326] text-base font-bold border border-[var(--accent)] hover:bg-[#d0c4ff] transition-all shadow-[0_4px_16px_rgba(185,167,255,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
                 >
                   {isLoadingTeacher ? '⏳ Correction en cours…' : '✅ Terminer (avis du prof)'}
                 </button>
@@ -776,7 +768,7 @@ export default function ApprendsPage() {
                     onClick={fetchAuthorJudgment}
                     disabled={isLoadingAuthorJudgment || !htmlToPlainText(content).trim()}
                     title={`${selected.authorName} juge votre texte, avec sa vraie personnalité et son style`}
-                    className={`px-4 py-2 rounded-lg bg-[var(--accent-3)]/10 hover:bg-[var(--accent-3)]/20 text-[var(--accent-3)] text-sm font-medium border border-[var(--accent-3)]/30 transition-all ${isLoadingAuthorJudgment ? 'opacity-50 cursor-wait' : ''}`}
+                    className={`px-4 py-2 rounded-lg bg-[var(--accent-3)]/10 hover:bg-[var(--accent-3)]/20 text-[var(--accent-3)] text-base font-medium border border-[var(--accent-3)]/30 transition-all ${isLoadingAuthorJudgment ? 'opacity-50 cursor-wait' : ''}`}
                   >
                     {isLoadingAuthorJudgment ? '⏳ …' : `🖋️ Avis de ${selected.authorName}`}
                   </button>
@@ -833,22 +825,25 @@ export default function ApprendsPage() {
 
             {/* Feedback column */}
             <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${100 - editorWidth}%` }}>
-              <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-[var(--border-medium)] bg-[var(--bg-secondary)]" role="tablist" aria-label="Retours">
+              <div className="flex-shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border-medium)] bg-[var(--bg-secondary)]" role="tablist" aria-label="Retours">
                 <button
                   onClick={() => setFeedbackTab('latest')}
-                  className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${feedbackTab === 'latest' ? 'border-[var(--accent)] bg-[var(--accent)] text-[#172027] shadow-sm' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]'}`}
+                  className={`workshop-tab ${feedbackTab === 'latest' ? 'workshop-tab-active' : ''}`}
                   role="tab"
                   aria-selected={feedbackTab === 'latest'}
                 >
-                  Derniers avis
+                  💬 Derniers avis
                 </button>
                 <button
                   onClick={() => setFeedbackTab('history')}
-                  className={`min-w-28 px-5 py-2.5 rounded-md text-base font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] ${feedbackTab === 'history' ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027] shadow-sm' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'}`}
+                  className={`workshop-tab ${feedbackTab === 'history' ? 'workshop-tab-active' : ''}`}
                   role="tab"
                   aria-selected={feedbackTab === 'history'}
                 >
-                  Historique ({selected.commentHistory.length})
+                  🗂️ Historique
+                  {selected.commentHistory.length > 0 && (
+                    <span className="workshop-tab-badge">{selected.commentHistory.length}</span>
+                  )}
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
@@ -897,7 +892,7 @@ export default function ApprendsPage() {
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-[var(--text-muted)] text-center mt-10">
+                    <p className="text-base text-[var(--text-muted)] text-center mt-10">
                       Aucun ancien commentaire pour cet exercice.
                     </p>
                   )
@@ -938,7 +933,7 @@ export default function ApprendsPage() {
                   </div>
                 )}
                 {!selected.peerComments && !selected.teacherCritique && !selected.authorJudgment && (
-                  <p className="text-sm text-[var(--text-muted)] text-center mt-10">
+                  <p className="text-base text-[var(--text-muted)] text-center mt-10">
                     Écrivez votre texte puis demandez l&apos;avis de vos camarades ou du professeur.
                   </p>
                 )}

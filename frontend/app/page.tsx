@@ -52,10 +52,10 @@ export default function Home() {
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-3)] animate-pulse" />
             Propulsé par l&apos;IA
           </span>
-          <h1 className="font-display font-bold text-6xl sm:text-7xl gradient-text tracking-tight mb-4 leading-tight">
+          <h1 className="font-display font-bold text-7xl sm:text-8xl gradient-text tracking-tight mb-4 leading-tight">
             Writer
           </h1>
-          <p className="text-[var(--text-secondary)] text-lg sm:text-xl font-medium">
+          <p className="text-[var(--text-secondary)] text-xl sm:text-2xl font-medium">
             Que voulez-vous faire aujourd&apos;hui&nbsp;?
           </p>
         </div>
@@ -71,10 +71,10 @@ export default function Home() {
               <span className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-white/[0.06] text-3xl border border-white/10 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
                 {c.icon}
               </span>
-              <h2 className="relative font-display font-bold text-2xl text-[var(--text-primary)] group-hover:gradient-text transition-colors">
+              <h2 className="relative font-display font-bold text-3xl text-[var(--text-primary)] group-hover:gradient-text transition-colors">
                 {c.title}
               </h2>
-              <p className="relative text-sm text-[var(--text-secondary)] leading-relaxed">
+              <p className="relative text-base text-[var(--text-secondary)] leading-relaxed">
                 {c.description}
               </p>
               <span className="relative mt-1 inline-flex items-center gap-1.5 text-[var(--accent-3)] text-xs font-bold tracking-wide opacity-0 group-hover:opacity-100 transition-all group-hover:gap-2.5">
@@ -84,7 +84,7 @@ export default function Home() {
           ))}
         </div>
 
-        <p className="mt-12 text-[var(--text-muted)] text-xs tracking-wide">
+        <p className="mt-12 text-[var(--text-muted)] text-sm tracking-wide">
           Pensé pour les auteurs, les curieux et les élèves qui veulent progresser.
         </p>
       </div>

@@ -314,13 +314,13 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
       .replace(/^\*\*(.+?)\*\*$/, '$1');  // unwrap bold if whole title is bold
     if (level <= 2) {
       return (
-        <h2 key={i} className="text-lg font-semibold text-[var(--text-primary)] mb-4 mt-6 first:mt-0 pb-2 border-b border-[var(--border-subtle)] tracking-tight">
+        <h2 key={i} className="text-xl font-semibold text-[var(--text-primary)] mb-4 mt-6 first:mt-0 pb-2 border-b border-[var(--border-subtle)] tracking-tight">
           {renderInline(content)}
         </h2>
       );
     }
     return (
-      <h3 key={i} className="text-[15px] font-semibold text-[var(--accent)] mt-6 mb-3 flex items-center gap-2">
+      <h3 key={i} className="text-[17px] font-semibold text-[var(--accent)] mt-6 mb-3 flex items-center gap-2">
         <span className="w-0.5 h-4 bg-[var(--accent)] rounded-full inline-block flex-shrink-0 opacity-60" />
         {renderInline(content)}
       </h3>
@@ -331,7 +331,7 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
   if (/^\*\*[^*]+\*\*:?\s*$/.test(trimmed)) {
     const inner = trimmed.replace(/^\*\*/, '').replace(/\*\*:?\s*$/, '');
     return (
-      <h4 key={i} className="text-sm font-semibold text-[var(--text-primary)] mt-5 mb-2">
+      <h4 key={i} className="text-base font-semibold text-[var(--text-primary)] mt-5 mb-2">
         {inner}
       </h4>
     );
@@ -341,7 +341,7 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
   const numberedBoldMatch = trimmed.match(/^(\d+)\.\s+\*\*(.+?)\*\*\s*$/);
   if (numberedBoldMatch) {
     return (
-      <h4 key={i} className="text-sm font-semibold text-[var(--accent)] mt-5 mb-2 flex items-center gap-2">
+      <h4 key={i} className="text-base font-semibold text-[var(--accent)] mt-5 mb-2 flex items-center gap-2">
         <span className="text-[var(--accent)]/60">{numberedBoldMatch[1]}.</span>
         {numberedBoldMatch[2]}
       </h4>
@@ -364,7 +364,7 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
       ? trimmed.slice(2)
       : trimmed.slice(trimmed.indexOf(' ') + 1);
     return (
-      <div key={i} className="flex gap-2 my-1.5 ml-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+      <div key={i} className="flex gap-2 my-1.5 ml-2 text-base leading-relaxed text-[var(--text-secondary)]">
         <span className="text-[var(--accent)] mt-0.5 flex-shrink-0">•</span>
         <span>{renderInline(content)}</span>
       </div>
@@ -377,14 +377,14 @@ function renderCritiqueLine(line: string, i: number): ReactNode {
     return (
       <div key={i} className="flex gap-2 my-1.5 ml-1">
         <span className="text-[var(--accent)] font-medium text-sm w-6 flex-shrink-0 text-right">{numberedMatch[1]}.</span>
-        <span className="text-[var(--text-secondary)] text-sm leading-relaxed">{renderInline(numberedMatch[2])}</span>
+        <span className="text-[var(--text-secondary)] text-base leading-relaxed">{renderInline(numberedMatch[2])}</span>
       </div>
     );
   }
 
   // Regular paragraph
   return (
-    <p key={i} className="text-[var(--text-secondary)] text-sm leading-relaxed my-1.5">
+    <p key={i} className="text-[var(--text-secondary)] text-base leading-relaxed my-1.5">
       {renderInline(line)}
     </p>
   );
@@ -1436,7 +1436,7 @@ export default function Home() {
         <div className="w-[17rem] h-full flex flex-col">
           {/* Logo */}
           <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-            <h1 className="font-display gradient-text font-bold text-base tracking-tight">✍️ J&apos;écris</h1>
+            <h1 className="font-display gradient-text font-bold text-lg tracking-tight">✍️ J&apos;écris</h1>
             <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
               ← Accueil
             </Link>
@@ -1452,7 +1452,7 @@ export default function Home() {
                 value={newBookName}
                 onChange={(e) => setNewBookName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateBook()}
-                className="input-writer flex-1 px-3 py-1.5 text-[var(--text-primary)] text-sm rounded-lg"
+                className="input-writer flex-1 px-3 py-1.5 text-[var(--text-primary)] text-base rounded-lg"
               />
               <button
                 onClick={handleCreateBook}
@@ -1486,7 +1486,7 @@ export default function Home() {
                   }`}
                   onClick={() => setSelectedBook(book)}
                 >
-                  <span className={`text-sm truncate ${selectedBook?.id === book.id ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
+                  <span className={`text-base truncate ${selectedBook?.id === book.id ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>
                     {book.title}
                   </span>
                   <button
@@ -1502,24 +1502,20 @@ export default function Home() {
                 {selectedBook?.id === book.id && (
                   <div className="ml-3 pl-3 border-l border-[var(--border-subtle)]">
                     {/* View toggle: Chapters / World Building */}
-                    <div className="flex gap-1 my-2">
+                    <div className="flex gap-2 my-2" role="tablist" aria-label="Vue de l'ouvrage">
                       <button
                         onClick={() => setSidebarView('chapters')}
-                        className={`flex-1 px-2 py-2 text-xs font-semibold tracking-wide uppercase rounded-md transition-all ${
-                          sidebarView === 'chapters'
-                            ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-bold'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
-                        }`}
+                        className={`workshop-tab workshop-tab-sm flex-1 ${sidebarView === 'chapters' ? 'workshop-tab-active' : ''}`}
+                        role="tab"
+                        aria-selected={sidebarView === 'chapters'}
                       >
-                        Chapitres
+                        📄 Chapitres
                       </button>
                       <button
                         onClick={() => { setSidebarView('worldbuilding'); setSelectedChapter(null); }}
-                        className={`flex-1 px-2 py-2 text-xs font-semibold tracking-wide uppercase rounded-md transition-all ${
-                          sidebarView === 'worldbuilding'
-                            ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-bold'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
-                        }`}
+                        className={`workshop-tab workshop-tab-sm flex-1 ${sidebarView === 'worldbuilding' ? 'workshop-tab-active' : ''}`}
+                        role="tab"
+                        aria-selected={sidebarView === 'worldbuilding'}
                       >
                         🌍 Univers
                       </button>
@@ -1535,7 +1531,7 @@ export default function Home() {
                         }`}
                         onClick={() => setSelectedChapter(chapter)}
                       >
-                        <span className={`text-sm truncate ${selectedChapter?.id === chapter.id ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-secondary)]'}`}>
+                        <span className={`text-base truncate ${selectedChapter?.id === chapter.id ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-secondary)]'}`}>
                           {chapter.title}
                         </span>
                         <button
@@ -1556,7 +1552,7 @@ export default function Home() {
                           value={newChapterName}
                           onChange={(e) => setNewChapterName(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
-                          className="input-writer flex-1 px-2 py-1 text-[var(--text-secondary)] text-xs rounded-md"
+                          className="input-writer flex-1 px-2 py-1 text-[var(--text-secondary)] text-sm rounded-md"
                         />
                         <button
                           onClick={handleCreateChapter}
@@ -1666,7 +1662,7 @@ export default function Home() {
         }}>
           {/* Toolbar */}
           <div className="flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
-            <span className="text-[var(--text-primary)] text-sm font-semibold tracking-tight">
+            <span className="text-[var(--text-primary)] text-base font-semibold tracking-tight">
               {selectedChapter ? selectedChapter.title : 'Éditeur'}
             </span>
             
@@ -1739,8 +1735,8 @@ export default function Home() {
           ) : (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
-                <p className="text-[var(--text-muted)] text-lg font-light mb-1">Aucun chapitre sélectionné</p>
-                <p className="text-[var(--text-muted)]/60 text-sm">Créez un ouvrage et un chapitre pour commencer</p>
+                <p className="text-[var(--text-muted)] text-xl font-light mb-1">Aucun chapitre sélectionné</p>
+                <p className="text-[var(--text-muted)]/60 text-base">Créez un ouvrage et un chapitre pour commencer</p>
               </div>
             </div>
           )}
@@ -1798,7 +1794,7 @@ export default function Home() {
           {/* Bottom Bar */}
           <div className="flex-shrink-0 px-5 py-3 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center gap-3">
             <select
-              className="input-writer px-3 py-2 rounded-lg text-[var(--text-secondary)] text-sm"
+              className="input-writer px-3 py-2 rounded-lg text-[var(--text-secondary)] text-base"
               value={selectedReviewer}
               onChange={(e) => setSelectedReviewer(e.target.value)}
             >
@@ -1807,14 +1803,14 @@ export default function Home() {
               ))}
             </select>
             <button
-              className="btn-accent flex-1 py-2.5 rounded-lg text-sm"
+              className="btn-accent flex-1 py-2.5 rounded-lg text-base"
               onClick={handleReview}
               disabled={loading || !text}
             >
               {loading ? 'Analyse en cours…' : 'Obtenir une critique'}
             </button>
             <button
-              className="py-2.5 px-4 rounded-lg text-sm font-medium transition-all border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)]/15"
+              className="py-2.5 px-4 rounded-lg text-base font-medium transition-all border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)]/15"
               onClick={handleDialogue}
               disabled={loading || !text}
               title="3 auteurs au hasard débattent de votre texte"
@@ -1822,7 +1818,7 @@ export default function Home() {
               {loading ? '…' : '🎲 Random'}
             </button>
             <button
-              className="py-2.5 px-4 rounded-lg text-sm font-medium transition-all border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/15"
+              className="py-2.5 px-4 rounded-lg text-base font-medium transition-all border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/15"
               onClick={handleReadersPanel}
               disabled={loading || !text}
               title="5 lecteurs aléatoires donnent leur avis"
@@ -1830,7 +1826,7 @@ export default function Home() {
               {loading ? '…' : '👥 Lecteurs'}
             </button>
             <button
-              className="py-2.5 px-4 rounded-lg text-sm font-medium transition-all border border-amber-500/50 text-amber-400 hover:bg-amber-500/15"
+              className="py-2.5 px-4 rounded-lg text-base font-medium transition-all border border-amber-500/50 text-amber-400 hover:bg-amber-500/15"
               onClick={favoritePanel.length > 0 ? handleCustomPanel : () => setShowPanelConfig(true)}
               disabled={loading || !text}
               title={favoritePanel.length > 0 ? `Mon panel : ${favoritePanel.length} auteurs` : 'Configurer mon panel'}
@@ -1941,46 +1937,41 @@ export default function Home() {
           )
         }}>
           {/* Tabs */}
-          <div className="flex-shrink-0 flex border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-3 border-b border-[var(--border-medium)] bg-[var(--bg-secondary)]" role="tablist" aria-label="Panneau critique">
             <button
               onClick={() => setCritiqueFullscreen(f => !f)}
-              className="px-3 py-3 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-sm"
+              className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border-2 border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors text-base"
               title={critiqueFullscreen ? 'Réduire le panneau' : 'Plein écran'}
+              aria-label={critiqueFullscreen ? 'Réduire le panneau' : 'Plein écran'}
             >
               {critiqueFullscreen ? '⊟' : '⊞'}
             </button>
             <button
               onClick={() => setRightTab('critique')}
-              className={`tab-btn px-5 py-3 text-sm font-medium ${
-                rightTab === 'critique'
-                  ? 'active text-[var(--accent)]'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-              }`}
+              className={`workshop-tab ${rightTab === 'critique' ? 'workshop-tab-active' : ''}`}
+              role="tab"
+              aria-selected={rightTab === 'critique'}
             >
-              Critique
+              💬 Critique
               {pastCritiques.length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-[var(--accent)]/10 text-[var(--accent)] rounded-full">{pastCritiques.length}</span>
+                <span className="workshop-tab-badge">{pastCritiques.length}</span>
               )}
             </button>
             <button
               onClick={() => setRightTab('contexte')}
-              className={`tab-btn px-5 py-3 text-sm font-medium ${
-                rightTab === 'contexte'
-                  ? 'active text-[var(--accent)]'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-              }`}
+              className={`workshop-tab ${rightTab === 'contexte' ? 'workshop-tab-active' : ''}`}
+              role="tab"
+              aria-selected={rightTab === 'contexte'}
             >
-              Contexte
+              🧭 Contexte
             </button>
             <button
               onClick={() => setRightTab('profil')}
-              className={`tab-btn px-5 py-3 text-sm font-medium ${
-                rightTab === 'profil'
-                  ? 'active text-[var(--accent)]'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-              }`}
+              className={`workshop-tab ${rightTab === 'profil' ? 'workshop-tab-active' : ''}`}
+              role="tab"
+              aria-selected={rightTab === 'profil'}
             >
-              Profil
+              👤 Profil
             </button>
           </div>
 

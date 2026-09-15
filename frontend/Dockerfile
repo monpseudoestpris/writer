@@ -8,11 +8,14 @@ WORKDIR /app/frontend
 RUN npm install -g pnpm && \
     export PATH="$(npm root -g)/.bin:$PATH"
 
-# Copy package.json and pnpm-lock.yaml
+# Copy package.json, pnpm-lock.yaml and .npmrc
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
-# Install dependencies using pnpm
-RUN pnpm install --frozen-lockfile
+# Install dependencies using pnpm.
+# --ignore-scripts: skip dependency build scripts without failing the install.
+# Prebuilt binaries for sharp/unrs-resolver (linuxmusl) are pulled via
+# optionalDependencies, so no native compilation is needed in the image.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy the rest of the application code
 COPY frontend/ .
