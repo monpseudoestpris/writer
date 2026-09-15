@@ -229,18 +229,18 @@ async def get_structured_comments(text: str, system_prompt: str) -> str:
     return result
 
 
-async def generate_text_from_mistral(system_prompt: str, user_content: str) -> str:
+async def generate_text_from_mistral(system_prompt: str, user_content: str, model: str = MISTRAL_BEST_MODEL) -> str:
     """Appel non-streaming au meilleur modèle Mistral, pour générer un contenu texte libre."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=generate_text", MISTRAL_BEST_MODEL)
+    logger.info("[AI] request_started provider=mistral model=%s operation=generate_text", model)
     client = get_mistral_client()
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content}
     ]
     response = await client.chat.complete_async(
-        model=MISTRAL_BEST_MODEL,
+        model=model,
         messages=messages
     )
     result = response.choices[0].message.content
-    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    _log_mistral_response(model, result)
     return result

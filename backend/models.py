@@ -134,6 +134,13 @@ class RewriteRequest(BaseModel):
     all_entries_context: Optional[str] = None
 
 
+class SelectionAssistRequest(BaseModel):
+    text: str
+    action: Literal["synonyms", "rephrase", "improve"]
+    context: Optional[str] = None
+    experience_level: Optional[str] = None
+
+
 # ==========================================
 # CLASSE D'ÉCRITURE CRÉATIVE ("J'apprends")
 # ==========================================

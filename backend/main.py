@@ -6,12 +6,12 @@ import os
 import re
 import logging
 import time
-from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest, ClassroomAuthorJudgmentRequest
+from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, SelectionAssistRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest, ClassroomAuthorJudgmentRequest
 from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages, get_structured_comments, generate_text_from_mistral
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 from backend.students import STUDENTS, STUDENT_IDS, TEACHER_NAME, TEACHER_PROMPT, get_students_list
 from backend.auteurs import AUTHORS, get_author_for_genre
-from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL
+from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, MISTRAL_FAST_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL
 from backend.anthropic_utils import stream_critique_from_anthropic
 from backend.openai_utils import stream_critique_from_openai
 from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, AUTHOR_JUDGMENT_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
@@ -727,6 +727,36 @@ async def rewrite_text(request: RewriteRequest):
     )
 
 
+@app.post("/selection-assist")
+async def selection_assist(request: SelectionAssistRequest):
+    action_instructions = {
+        "synonyms": "Propose 5 synonymes ou expressions proches, adaptés au sens et au registre. Réponds uniquement avec une liste JSON de chaînes.",
+        "rephrase": "Propose 3 reformulations naturelles, en conservant le sens et le registre. Réponds uniquement avec une liste JSON de chaînes.",
+        "improve": "Propose 3 versions plus fluides et plus précises, sans changer le sens ni ajouter d'information. Réponds uniquement avec une liste JSON de chaînes.",
+    }[request.action]
+    context = f"\nContexte de la phrase ou de l'exercice : {request.context}" if request.context else ""
+    level = f"\nNiveau de l'élève : {request.experience_level}" if request.experience_level else ""
+    prompt = (
+        "Tu es un assistant d'écriture rapide. Travaille uniquement sur le texte sélectionné. "
+        "Ne fais aucune explication et ne produis aucun markdown. "
+        f"{action_instructions}{context}{level}"
+    )
+    try:
+        raw = await generate_text_from_mistral(
+            prompt,
+            f"Texte sélectionné :\n{request.text}",
+            model=MISTRAL_FAST_MODEL,
+        )
+        import json
+        suggestions = json.loads(raw.strip().removeprefix("```").removesuffix("```").strip())
+        if not isinstance(suggestions, list):
+            suggestions = [str(suggestions)]
+    except Exception as error:
+        logger.exception("[AI] route_failed route=selection_assist model=%s", MISTRAL_FAST_MODEL)
+        return {"error": str(error), "suggestions": []}
+    return {"suggestions": [str(item) for item in suggestions[:5]]}
+
+
 @app.post("/chat/summarize")
 async def summarize_chat(request: ChatSummarizeRequest):
     """Résume un batch de messages de chat via mistral-small."""
@@ -954,27 +984,34 @@ async def classroom_students():
 _CLASSROOM_EXPERIENCE_CONTEXTS = {
     "grand_debutant": (
         "Grand débutant", 1,
-        "Privilégie une seule compétence à la fois, des consignes très claires et des contraintes simples. "
-        "Explique les termes techniques et valorise avant tout l'élan, la compréhension de la consigne et les progrès visibles."
+        "NIVEAU STRICT : propose uniquement des scènes courtes et concrètes du quotidien. "
+        "Autorise au maximum une compétence à la fois, 1 contrainte simple et 100 mots. "
+        "Interdis les lipogrammes, structures complexes, points de vue multiples, sous-texte, commentaire de texte, "
+        "pastiche, suspense à indices, poésie à forme fixe et toute contrainte cumulée. "
+        "La consigne doit être réalisable sans vocabulaire technique."
     ),
     "debutant": (
         "Débutant", 2,
-        "Propose des exercices accessibles avec une technique identifiable et peu de contraintes cumulées. "
-        "Les retours doivent rester très concrets, pédagogiques et proposer une priorité d'amélioration à la fois."
+        "NIVEAU STRICT : propose une seule technique identifiable avec 1 à 2 contraintes simples et 100 à 200 mots. "
+        "Évite les contraintes cumulées, les structures non linéaires, le commentaire composé, le sous-texte complexe "
+        "et les exercices qui demandent plusieurs points de vue."
     ),
     "intermediaire": (
         "Intermédiaire", 3,
-        "Propose des exercices qui demandent de maîtriser une technique narrative ou stylistique. "
+        "NIVEAU STRICT : propose une technique narrative ou stylistique avec 2 à 3 contraintes maîtrisables et 150 à 300 mots. "
+        "Une structure ou un point de vue exigeant est possible, mais pas plusieurs difficultés majeures à la fois. "
         "Les retours peuvent employer le vocabulaire d'atelier en l'explicitant et doivent relever les choix de structure, de voix et de rythme."
     ),
     "avance": (
         "Avancé", 4,
-        "Propose des exercices ambitieux à contraintes croisées, qui demandent une intention littéraire consciente. "
+        "NIVEAU STRICT : propose des exercices ambitieux à 2 ou 3 contraintes croisées, jusqu'à 500 mots, "
+        "qui demandent une intention littéraire consciente. Réserve les formes les plus complexes aux exercices les plus adaptés. "
         "Les retours doivent être précis et exigeants sur la maîtrise du style, de la structure et des effets produits."
     ),
     "ecrivain_publie": (
         "Écrivain publié", 5,
-        "Propose des exercices de haut niveau, formellement ambitieux et proches d'un travail de publication. "
+        "NIVEAU STRICT : propose des exercices de haut niveau, formellement ambitieux et proches d'un travail de publication, "
+        "avec contraintes multiples, formes complexes et longueur adaptée au projet. "
         "Les retours doivent être francs, rigoureux et éditoriaux, en questionnant la singularité, la cohérence d'ensemble et l'impact sur le lecteur."
     ),
 }

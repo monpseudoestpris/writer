@@ -7,7 +7,9 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import { FontSize } from '@tiptap/extension-text-style';
 import Placeholder from '@tiptap/extension-placeholder';
 import Highlight from '@tiptap/extension-highlight';
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+
+type SelectionAssistAction = 'synonyms' | 'rephrase' | 'improve';
 
 interface RichEditorProps {
   content: string;
@@ -17,12 +19,20 @@ interface RichEditorProps {
   wrapperClassName?: string;
   style?: React.CSSProperties;
   editorRef?: React.MutableRefObject<ReturnType<typeof useEditor> | null>;
+  onSelectionAssist?: (text: string, action: SelectionAssistAction) => Promise<string[]>;
 }
 
-export default function RichEditor({ content, onUpdate, placeholder, className, wrapperClassName, style, editorRef }: RichEditorProps) {
+export default function RichEditor({ content, onUpdate, placeholder, className, wrapperClassName, style, editorRef, onSelectionAssist }: RichEditorProps) {
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
   const isSettingContent = useRef(false);
+  const selectionAssistRef = useRef(onSelectionAssist);
+  const [selectionMenu, setSelectionMenu] = useState<{ text: string; from: number; to: number; top: number; left: number } | null>(null);
+  const [selectionAction, setSelectionAction] = useState<SelectionAssistAction | null>(null);
+  const [selectionSuggestions, setSelectionSuggestions] = useState<string[]>([]);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+
+  selectionAssistRef.current = onSelectionAssist;
 
   const editor = useEditor({
     extensions: [
@@ -44,6 +54,24 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
       if (!isSettingContent.current) {
         onUpdateRef.current(ed.getHTML());
       }
+    },
+    onSelectionUpdate: ({ editor: ed }) => {
+      if (!selectionAssistRef.current) return;
+      const { from, to } = ed.state.selection;
+      if (from === to) {
+        setSelectionMenu(null);
+        return;
+      }
+      const text = ed.state.doc.textBetween(from, to, ' ').trim();
+      if (!text) {
+        setSelectionMenu(null);
+        return;
+      }
+      const coords = ed.view.coordsAtPos(from);
+      setSelectionError(null);
+      setSelectionSuggestions([]);
+      setSelectionAction(null);
+      setSelectionMenu({ text, from, to, top: Math.max(8, coords.bottom + 8), left: Math.max(8, coords.left) });
     },
     editorProps: {
       attributes: {
@@ -75,9 +103,73 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
 
   if (!editor) return null;
 
+  const requestSelectionAssist = async (action: SelectionAssistAction) => {
+    if (!selectionMenu || !selectionAssistRef.current) return;
+    setSelectionAction(action);
+    setSelectionError(null);
+    try {
+      const suggestions = await selectionAssistRef.current(selectionMenu.text, action);
+      setSelectionSuggestions(suggestions);
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : 'Impossible de proposer une reformulation.');
+    } finally {
+      setSelectionAction(null);
+    }
+  };
+
+  const replaceSelection = (suggestion: string) => {
+    if (!selectionMenu || !editor) return;
+    editor.chain().focus().setTextSelection({ from: selectionMenu.from, to: selectionMenu.to }).insertContent(suggestion).run();
+    setSelectionMenu(null);
+    setSelectionSuggestions([]);
+  };
+
   return (
     <div className={wrapperClassName || ''}>
       <EditorContent editor={editor} />
+      {selectionMenu && (
+        <div
+          className="fixed z-50 w-72 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-elevated)] p-3 shadow-2xl"
+          style={{ top: selectionMenu.top, left: selectionMenu.left }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <div className="mb-2 truncate text-xs text-[var(--text-muted)]" title={selectionMenu.text}>
+            « {selectionMenu.text} »
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              ['synonyms', 'Synonymes'],
+              ['rephrase', 'Reformuler'],
+              ['improve', 'Améliorer'],
+            ] as [SelectionAssistAction, string][]).map(([action, label]) => (
+              <button
+                key={action}
+                type="button"
+                onClick={() => requestSelectionAssist(action)}
+                disabled={selectionAction !== null}
+                className="rounded-md border border-[var(--border-medium)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-wait disabled:opacity-50"
+              >
+                {selectionAction === action ? '⏳' : label}
+              </button>
+            ))}
+          </div>
+          {selectionError && <p className="mt-2 text-xs text-red-300">{selectionError}</p>}
+          {selectionSuggestions.length > 0 && (
+            <div className="mt-3 space-y-1.5 border-t border-[var(--border-subtle)] pt-2">
+              {selectionSuggestions.map((suggestion, index) => (
+                <button
+                  key={`${suggestion}-${index}`}
+                  type="button"
+                  onClick={() => replaceSelection(suggestion)}
+                  className="block w-full rounded-md border border-transparent bg-[var(--bg-surface)] px-2.5 py-2 text-left text-sm leading-snug text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -93,17 +185,18 @@ interface EditorToolbarProps {
 }
 
 export function EditorToolbar({ editor, wordCount, onGenerateSummary, isGeneratingSummary, hasSummary, onShowSummary }: EditorToolbarProps) {
-  if (!editor) return null;
-
-  const currentFontSize = editor.getAttributes('textStyle')?.fontSize;
-  const sizeNum = currentFontSize ? parseInt(currentFontSize) : 18;
-
   const changeFontSize = useCallback((delta: number) => {
+    if (!editor) return;
     const current = editor.getAttributes('textStyle')?.fontSize;
     const currentNum = current ? parseInt(current) : 18;
     const newSize = Math.min(72, Math.max(8, currentNum + delta));
     editor.chain().focus().setFontSize(`${newSize}px`).run();
   }, [editor]);
+
+  if (!editor) return null;
+
+  const currentFontSize = editor.getAttributes('textStyle')?.fontSize;
+  const sizeNum = currentFontSize ? parseInt(currentFontSize) : 18;
 
   const getCurrentStyle = () => {
     if (editor.isActive('heading', { level: 1 })) return 'h1';
