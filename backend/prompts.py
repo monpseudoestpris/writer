@@ -685,7 +685,7 @@ REVIEW_DOCUMENT_JSON_PROMPT = (
     '  {"passage": "titre de section vide", "comment": "Cette section est vide et devrait être développée.", "rewrite": ""}\n'
     ']\n\n'
     "RÈGLES IMPORTANTES :\n"
-    "- Produis entre 8 et 25 commentaires selon la longueur du document\n"
+    "- Produis entre 5 et 10 commentaires selon la longueur du document\n"
     "- Les passages cités doivent être des COPIES EXACTES du texte original (une phrase ou un bout de phrase)\n"
     "- CHAQUE commentaire DOIT inclure une réécriture dans le champ \"rewrite\" (sauf commentaires purement structurels)\n"
     "- CORRIGE SYSTÉMATIQUEMENT les fautes d'orthographe, de grammaire, de conjugaison, de ponctuation et de syntaxe. "

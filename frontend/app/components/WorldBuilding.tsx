@@ -25,6 +25,31 @@ import {
 import RichEditor, { EditorToolbar } from './RichEditor';
 import type { Editor } from '@tiptap/react';
 
+const API_URL = 'http://localhost:8000';
+
+const handleSelectionAssist = async (
+  text: string,
+  action: 'synonyms' | 'rephrase' | 'improve'
+): Promise<string[]> => {
+  try {
+    const response = await fetch(`${API_URL}/selection-assist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, action }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erreur ${response.status}`);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data.suggestions) ? data.suggestions.map(String) : [];
+  } catch (error) {
+    console.error('selection assist failed', error);
+    return [];
+  }
+};
+
 // Inline markdown renderer (same logic as page.tsx)
 function renderInline(text: string): ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
@@ -1384,6 +1409,7 @@ export default function WorldBuilding({ bookId, bookSummary, reviewers }: Props)
                   <RichEditor
                     content={editContent}
                     onUpdate={(html) => handleContentChange(html)}
+                    onSelectionAssist={handleSelectionAssist}
                     placeholder="Décrivez cet élément de votre univers en détail…"
                     wrapperClassName="editor-area w-full flex-1 min-h-[100px] rounded-xl overflow-y-auto"
                     className="p-4 placeholder-[#999] leading-relaxed focus:outline-none min-h-full"

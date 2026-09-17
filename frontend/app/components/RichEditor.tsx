@@ -28,6 +28,7 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
   const isSettingContent = useRef(false);
   const selectionAssistRef = useRef(onSelectionAssist);
   const [selectionMenu, setSelectionMenu] = useState<{ text: string; from: number; to: number; top: number; left: number } | null>(null);
+  const [selectionPanelOpen, setSelectionPanelOpen] = useState(false);
   const [selectionAction, setSelectionAction] = useState<SelectionAssistAction | null>(null);
   const [selectionSuggestions, setSelectionSuggestions] = useState<string[]>([]);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -60,11 +61,13 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
       const { from, to } = ed.state.selection;
       if (from === to) {
         setSelectionMenu(null);
+        setSelectionPanelOpen(false);
         return;
       }
       const text = ed.state.doc.textBetween(from, to, ' ').trim();
       if (!text) {
         setSelectionMenu(null);
+        setSelectionPanelOpen(false);
         return;
       }
       const coords = ed.view.coordsAtPos(from);
@@ -72,6 +75,7 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
       setSelectionSuggestions([]);
       setSelectionAction(null);
       setSelectionMenu({ text, from, to, top: Math.max(8, coords.bottom + 8), left: Math.max(8, coords.left) });
+      setSelectionPanelOpen(false);
     },
     editorProps: {
       attributes: {
@@ -127,15 +131,45 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
   return (
     <div className={wrapperClassName || ''}>
       <EditorContent editor={editor} />
-      {selectionMenu && (
+
+      {selectionMenu && !selectionPanelOpen && (
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setSelectionPanelOpen(true)}
+          className="fixed z-50 inline-flex items-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] shadow-lg transition hover:scale-[1.02]"
+          style={{ top: selectionMenu.top, left: selectionMenu.left }}
+          title="Ouvrir l’assistant d’écriture"
+        >
+          ✦ IA
+        </button>
+      )}
+
+      {selectionMenu && selectionPanelOpen && (
         <div
-          className="fixed z-50 w-72 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-elevated)] p-3 shadow-2xl"
+          className="fixed z-50 w-72 rounded-xl border border-[var(--border-medium)] bg-[var(--bg-elevated)] p-3 shadow-2xl"
           style={{ top: selectionMenu.top, left: selectionMenu.left }}
           onMouseDown={(event) => event.preventDefault()}
         >
-          <div className="mb-2 truncate text-xs text-[var(--text-muted)]" title={selectionMenu.text}>
-            « {selectionMenu.text} »
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <div className="min-w-0 truncate text-xs text-[var(--text-muted)]" title={selectionMenu.text}>
+              « {selectionMenu.text} »
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectionPanelOpen(false);
+                setSelectionSuggestions([]);
+                setSelectionError(null);
+              }}
+              className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--bg-surface)] text-[var(--text-muted)] text-xs transition hover:text-[var(--text-primary)]"
+              aria-label="Fermer l’assistant"
+              title="Fermer"
+            >
+              ×
+            </button>
           </div>
+
           <div className="flex flex-wrap gap-1.5">
             {([
               ['synonyms', 'Synonymes'],
@@ -153,6 +187,7 @@ export default function RichEditor({ content, onUpdate, placeholder, className, 
               </button>
             ))}
           </div>
+
           {selectionError && <p className="mt-2 text-xs text-red-300">{selectionError}</p>}
           {selectionSuggestions.length > 0 && (
             <div className="mt-3 space-y-1.5 border-t border-[var(--border-subtle)] pt-2">

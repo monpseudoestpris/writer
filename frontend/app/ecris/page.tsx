@@ -21,6 +21,31 @@ import type { Editor } from '@tiptap/react';
 
 type Reviewer = { id: string; name: string };
 
+const API_URL = 'http://localhost:8000';
+
+const handleSelectionAssist = async (
+  text: string,
+  action: 'synonyms' | 'rephrase' | 'improve'
+): Promise<string[]> => {
+  try {
+    const response = await fetch(`${API_URL}/selection-assist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, action }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erreur ${response.status}`);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data.suggestions) ? data.suggestions.map(String) : [];
+  } catch (error) {
+    console.error('selection assist failed', error);
+    return [];
+  }
+};
+
 // Normalize HTML from contentEditable: flatten to clean inline HTML with uniform <br><br> paragraph breaks
 const sanitizeEditorHtml = (html: string): string => {
   if (!html || !html.trim()) return '';
@@ -1726,6 +1751,7 @@ export default function Home() {
             <RichEditor
               content={text}
               onUpdate={(html) => setText(html)}
+              onSelectionAssist={handleSelectionAssist}
               placeholder="Commencez à écrire…"
               wrapperClassName="editor-area flex-1 min-h-0 overflow-y-auto"
               className="px-10 py-8 focus:outline-none min-h-full"

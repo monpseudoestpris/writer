@@ -20,6 +20,29 @@ import type { Editor } from '@tiptap/react';
 
 const API_URL = 'http://localhost:8000';
 
+const handleSelectionAssist = async (
+  text: string,
+  action: 'synonyms' | 'rephrase' | 'improve'
+): Promise<string[]> => {
+  try {
+    const response = await fetch(`${API_URL}/selection-assist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, action }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erreur ${response.status}`);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data.suggestions) ? data.suggestions.map(String) : [];
+  } catch (error) {
+    console.error('selection assist failed', error);
+    return [];
+  }
+};
+
 type Student = { id: string; name: string; age: number; background: string };
 
 const EXPERIENCE_LEVELS: { value: ClassroomExperienceLevel; label: string }[] = [
@@ -734,6 +757,7 @@ export default function ApprendsPage() {
                 <RichEditor
                   content={content}
                   onUpdate={persistContent}
+                  onSelectionAssist={handleSelectionAssist}
                   editorRef={editorRef}
                   placeholder="Écrivez votre réponse à l'exercice…"
                   wrapperClassName="editor-area min-h-full"

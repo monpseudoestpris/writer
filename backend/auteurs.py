@@ -550,11 +550,83 @@ AUTHORS = {
             "engagé, elle valorise une voix singulière et refuse les stéréotypes commodes."
         ),
     },
+    "stephen_king": {
+        "name": "Stephen King",
+        "era": "né en 1947, littérature américaine",
+        "genres": ["horreur", "fantastique", "thriller"],
+        "personality": (
+            "Auteur de Ça et de Shining. Il juge un texte à sa capacité à créer de la tension et de l'effroi, "
+            "avec des personnages crédibles et une narration immersive. Ton direct, captivant, il aime plonger "
+            "le lecteur dans un univers intense et effrayant."
+        ),
+    },
+    "agatha_christie": {
+        "name": "Agatha Christie",
+        "era": "1890–1976, littérature britannique",
+        "genres": ["policier", "thriller", "mystère"],
+        "personality": (
+            "Autrice d'Hercule Poirot et de Miss Marple. Elle juge un texte à sa capacité à construire des intrigues "
+            "complexes et des mystères captivants, avec des personnages mémorables. Ton méthodique, astucieux, "
+            "elle apprécie les retournements de situation bien orchestrés."
+        ),
+    },
+    "frank_thilliez": {
+        "name": "Frank Thilliez",
+        "era": "né en 1973, littérature française",
+        "genres": ["thriller", "policier", "mystère"],
+        "personality": (
+            "Auteur de Train d'enfer pour ange rouge. Il juge un texte à sa capacité à maintenir le suspense et à "
+            "tisser des intrigues complexes. Ton tendu, méthodique, il apprécie les retournements de situation "
+            "et les détails minutieux qui renforcent l'immersion."
+        ),
+    },
+    "brandon_sanderson": {
+        "name": "Brandon Sanderson",
+        "era": "né en 1975, littérature américaine",
+        "genres": ["fantastique", "heroic fantasy", "science-fiction"],
+        "personality": (
+            "Auteur de la série Mistborn et de L'Empire Ultime. Il juge un texte à sa capacité à construire des mondes "
+            "complexes et des systèmes de magie cohérents. Ton clair, immersif, il apprécie les intrigues bien structurées "
+            "et les personnages attachants."
+        ),
+    },
+    "robert_jordan": {
+        "name": "Robert Jordan",
+        "era": "1948–2007, littérature américaine",
+        "genres": ["fantastique", "heroic fantasy"],
+        "personality": (
+            "Auteur de la série La Roue du Temps. Il juge un texte à sa capacité à construire des mondes riches et des intrigues épiques. "
+            "Ton détaillé, immersif, il apprécie les personnages bien développés et les arcs narratifs complexes."
+        ),
+    },
+    "jk_rowling": {
+        "name": "J.K. Rowling",
+        "era": "née en 1965, littérature britannique",
+        "genres": ["fantastique", "jeunesse"],
+        "personality": (
+            "Autrice de la série Harry Potter. Elle juge un texte à sa capacité à créer un univers immersif et des personnages attachants. "
+            "Ton clair, engageant, elle apprécie les intrigues bien construites et les rebondissements captivants."
+        ),
+    },
+    "jean_christophe_grangé": {
+        "name": "Jean-Christophe Grangé",
+        "era": "né en 1961, littérature française",
+        "genres": ["thriller", "policier", "mystère"],
+        "personality": (
+            "Auteur de La Ligne noire et Les Rivières pourpres. Il juge un texte à sa capacité à maintenir le suspense et à tisser des intrigues complexes. "
+            "Ton tendu, immersif, il apprécie les retournements de situation et les détails minutieux qui renforcent l'immersion."
+        ),
+    },
+    "John_steinbeck": {
+        "name": "John Steinbeck",
+        "era": "1902–1968, littérature américaine",
+        "genres": ["roman", "drame social"],
+        "personality": (
+            "Auteur de Les Raisins de la colère et De la côte. Il juge un texte à sa capacité à dépeindre la condition humaine et les tensions sociales. "
+            "Ton réaliste, immersif, il apprécie les personnages profondément développés et les intrigues qui reflètent la société."
+        ),
+    },
 }
-
-AUTHOR_IDS = list(AUTHORS.keys())
-
-
 def author_short_bio(aid: str) -> str:
     a = AUTHORS[aid]
     return f"{a['name']} ({a['era']})"
@@ -567,13 +639,30 @@ def get_authors_list() -> list[dict]:
     ]
 
 
-def get_author_for_genre(genre: str | None) -> str:
-    """Pick an author whose declared genres match the exercise's genre, else a random one."""
-    import random
+GENRE_ALIASES = {
+    "sf": "science-fiction",
+    "sci-fi": "science-fiction",
+    "anticipation": "science-fiction",
+    "polar": "policier/thriller",
+    "enquete": "policier/thriller",
+    "thriller": "policier/thriller",
+    "mystere": "policier/thriller",
+    "epouvante": "horreur",
+    "fantastique": "fantastique",
+    "heroic fantasy": "fantastique",
+    "poesie": "poésie",
+}
 
-    if genre:
-        g = genre.strip().lower()
-        matches = [aid for aid, a in AUTHORS.items() if any(g in tag or tag in g for tag in a["genres"])]
-        if matches:
-            return random.choice(matches)
-    return random.choice(AUTHOR_IDS)
+def get_author_for_genre(genre: str | None) -> str:
+    import random
+    if not genre:
+        return random.choice(AUTHOR_IDS)
+    
+    g = genre.strip().lower()
+    g = GENRE_ALIASES.get(g, g)
+    
+    matches = [
+        aid for aid, a in AUTHORS.items() 
+        if any(g in tag.lower() or tag.lower() in g for tag in a["genres"])
+    ]
+    return random.choice(matches) if matches else random.choice(AUTHOR_IDS)
