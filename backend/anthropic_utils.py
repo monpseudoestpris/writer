@@ -5,8 +5,16 @@ from typing import AsyncGenerator
 from anthropic import AsyncAnthropic
 
 from backend.ai_models import ANTHROPIC_BEST_MODEL
+from backend.prompts import with_human_style
 
 logger = logging.getLogger(__name__)
+
+
+def get_anthropic_generation_kwargs() -> dict:
+    return {
+        "temperature": 0.8,
+        "top_p": 0.9,
+    }
 
 
 def get_anthropic_client() -> AsyncAnthropic:
@@ -30,8 +38,9 @@ async def stream_critique_from_anthropic(text: str, prompt: str, model: str = AN
     async with client.messages.stream(
         model=model,
         max_tokens=4096,
-        system=prompt,
+        system=with_human_style(prompt),
         messages=[{"role": "user", "content": user_content}],
+        **get_anthropic_generation_kwargs(),
     ) as stream:
         async for chunk in stream.text_stream:
             response_parts.append(chunk)
@@ -47,8 +56,9 @@ async def stream_from_anthropic(system_prompt: str, user_content: str, model: st
     async with client.messages.stream(
         model=model,
         max_tokens=4096,
-        system=system_prompt,
+        system=with_human_style(system_prompt),
         messages=[{"role": "user", "content": user_content}],
+        **get_anthropic_generation_kwargs(),
     ) as stream:
         async for chunk in stream.text_stream:
             response_parts.append(chunk)

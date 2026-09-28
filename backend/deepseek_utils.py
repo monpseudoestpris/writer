@@ -4,32 +4,33 @@ from typing import AsyncGenerator
 
 from openai import AsyncOpenAI
 
-from backend.ai_models import OPENAI_BEST_MODEL
+from backend.ai_models import DEEPSEEK_BEST_MODEL
 from backend.prompts import with_human_style
 
 logger = logging.getLogger(__name__)
 
 
-def get_openai_generation_kwargs() -> dict:
+def get_deepseek_generation_kwargs() -> dict:
     return {
         "temperature": 0.8,
         "top_p": 0.9,
-        "frequency_penalty": 0.3,
-        "presence_penalty": 0.2,
     }
 
 
-def get_openai_client() -> AsyncOpenAI:
-    api_key = os.getenv("OPENAI_API_KEY")
+def get_deepseek_client() -> AsyncOpenAI:
+    api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY not found in environment variables.")
-    return AsyncOpenAI(api_key=api_key)
+        raise ValueError("DEEPSEEK_API_KEY not found in environment variables.")
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://api.deepseek.com/v1",
+    )
 
 
-async def stream_critique_from_openai(text: str, prompt: str, model: str = OPENAI_BEST_MODEL) -> AsyncGenerator[str, None]:
-    logger.info("[AI] request_started provider=openai model=%s", model)
+async def stream_critique_from_deepseek(text: str, prompt: str, model: str = DEEPSEEK_BEST_MODEL) -> AsyncGenerator[str, None]:
+    logger.info("[AI] request_started provider=deepseek model=%s", model)
     response_parts: list[str] = []
-    client = get_openai_client()
+    client = get_deepseek_client()
     user_content = (
         "[DÉBUT DU TEXTE À CRITIQUER]\n"
         f"{text}\n"
@@ -44,21 +45,20 @@ async def stream_critique_from_openai(text: str, prompt: str, model: str = OPENA
             {"role": "user", "content": user_content},
         ],
         stream=True,
-        **get_openai_generation_kwargs(),
+        **get_deepseek_generation_kwargs(),
     )
     async for chunk in stream:
         delta = chunk.choices[0].delta.content
         if delta:
             response_parts.append(delta)
             yield delta
-    logger.info("[AI] response_received provider=openai model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
+    logger.info("[AI] response_received provider=deepseek model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
 
 
-async def stream_from_openai(system_prompt: str, user_content: str, model: str = OPENAI_BEST_MODEL) -> AsyncGenerator[str, None]:
-    """Generic streaming call (no [DÉBUT/FIN DU TEXTE] wrapping), for non-critique generations."""
-    logger.info("[AI] request_started provider=openai model=%s", model)
+async def stream_from_deepseek(system_prompt: str, user_content: str, model: str = DEEPSEEK_BEST_MODEL) -> AsyncGenerator[str, None]:
+    logger.info("[AI] request_started provider=deepseek model=%s", model)
     response_parts: list[str] = []
-    client = get_openai_client()
+    client = get_deepseek_client()
     stream = await client.chat.completions.create(
         model=model,
         messages=[
@@ -66,11 +66,11 @@ async def stream_from_openai(system_prompt: str, user_content: str, model: str =
             {"role": "user", "content": user_content},
         ],
         stream=True,
-        **get_openai_generation_kwargs(),
+        **get_deepseek_generation_kwargs(),
     )
     async for chunk in stream:
         delta = chunk.choices[0].delta.content
         if delta:
             response_parts.append(delta)
             yield delta
-    logger.info("[AI] response_received provider=openai model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
+    logger.info("[AI] response_received provider=deepseek model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])

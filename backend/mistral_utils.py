@@ -2,11 +2,24 @@ import os
 import logging
 from typing import AsyncGenerator
 
-from mistralai.client import Mistral
+try:
+    from mistralai import Mistral
+except ImportError:  # pragma: no cover - compatibility for older SDK versions
+    from mistralai.client import Mistral
 
 from backend.ai_models import MISTRAL_BEST_MODEL
+from backend.prompts import with_human_style
 
 logger = logging.getLogger(__name__)
+
+
+def get_mistral_generation_kwargs() -> dict:
+    return {
+        "temperature": 0.8,
+        "top_p": 0.9,
+        "frequency_penalty": 0.3,
+        "presence_penalty": 0.2,
+    }
 
 
 def _log_mistral_response(model: str, response: str) -> None:
@@ -27,7 +40,7 @@ async def summarize_single_critique(critique: str) -> str:
     messages = [
         {
             "role": "system",
-            "content": (
+            "content": with_human_style(
                 "Résume cette critique littéraire de manière structurée en français. "
                 "Organise le résumé en sections claires : points forts, points faibles, suggestions principales. "
                 "Sois factuel et précis (300 mots max), sans formule de politesse."
@@ -38,7 +51,8 @@ async def summarize_single_critique(critique: str) -> str:
     
     response = await client.chat.complete_async(
         model=MISTRAL_BEST_MODEL,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     )
     
     result = response.choices[0].message.content
@@ -54,7 +68,7 @@ async def summarize_text(text: str) -> str:
     messages = [
         {
             "role": "system",
-            "content": (
+            "content": with_human_style(
                 "Tu es un assistant qui résume des textes littéraires de manière factuelle et concise. "
                 "Produis un résumé en 5 à 10 lignes qui capture les informations essentielles : "
                 "personnages présents, lieux, actions principales, enjeux narratifs, éléments de world building. "
@@ -67,7 +81,8 @@ async def summarize_text(text: str) -> str:
     
     response = await client.chat.complete_async(
         model=MISTRAL_BEST_MODEL,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     )
     
     result = response.choices[0].message.content
@@ -88,7 +103,7 @@ async def summarize_critiques(critiques: list[dict]) -> str:
     messages = [
         {
             "role": "system",
-            "content": (
+            "content": with_human_style(
                 "Tu es un assistant qui résume des critiques littéraires. "
                 "Fais une synthèse concise et structurée des critiques suivantes en français. "
                 "Regroupe par thème : points forts relevés, points faibles récurrents, suggestions principales. "
@@ -100,7 +115,8 @@ async def summarize_critiques(critiques: list[dict]) -> str:
     
     response = await client.chat.complete_async(
         model=MISTRAL_BEST_MODEL,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     )
     
     result = response.choices[0].message.content
@@ -126,7 +142,8 @@ async def stream_critique_from_mistral(text: str, prompt: str, model: str = MIST
     
     async for chunk in await client.chat.stream_async(
         model=model,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     ):
         if chunk.data.choices[0].delta.content:
             delta = chunk.data.choices[0].delta.content
@@ -141,13 +158,14 @@ async def stream_from_mistral_small(system_prompt: str, user_content: str) -> As
     response_parts: list[str] = []
     client = get_mistral_client()
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": with_human_style(system_prompt)},
         {"role": "user", "content": user_content}
     ]
     
     async for chunk in await client.chat.stream_async(
         model=MISTRAL_BEST_MODEL,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     ):
         if chunk.data.choices[0].delta.content:
             delta = chunk.data.choices[0].delta.content
@@ -176,9 +194,10 @@ async def summarize_chat_messages(messages: list[dict]) -> str:
     response = await client.chat.complete_async(
         model=MISTRAL_BEST_MODEL,
         messages=[
-            {"role": "system", "content": prompt},
+            {"role": "system", "content": with_human_style(prompt)},
             {"role": "user", "content": formatted}
-        ]
+        ],
+        **get_mistral_generation_kwargs(),
     )
     result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
@@ -197,7 +216,8 @@ async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, 
     
     async for chunk in await client.chat.stream_async(
         model=MISTRAL_BEST_MODEL,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     ):
         if chunk.data.choices[0].delta.content:
             delta = chunk.data.choices[0].delta.content
@@ -217,12 +237,13 @@ async def get_structured_comments(text: str, system_prompt: str) -> str:
         "Analyse ce document et produis tes commentaires au format JSON demandé."
     )
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": with_human_style(system_prompt)},
         {"role": "user", "content": user_content}
     ]
     response = await client.chat.complete_async(
         model=MISTRAL_BEST_MODEL,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     )
     result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
@@ -234,12 +255,13 @@ async def generate_text_from_mistral(system_prompt: str, user_content: str, mode
     logger.info("[AI] request_started provider=mistral model=%s operation=generate_text", model)
     client = get_mistral_client()
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": with_human_style(system_prompt)},
         {"role": "user", "content": user_content}
     ]
     response = await client.chat.complete_async(
         model=model,
-        messages=messages
+        messages=messages,
+        **get_mistral_generation_kwargs(),
     )
     result = response.choices[0].message.content
     _log_mistral_response(model, result)

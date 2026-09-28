@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
 import re
+import random
 import logging
 import time
 from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, SelectionAssistRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest, ClassroomAuthorJudgmentRequest
@@ -14,6 +15,7 @@ from backend.auteurs import AUTHORS, get_author_for_genre
 from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, MISTRAL_FAST_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL
 from backend.anthropic_utils import stream_critique_from_anthropic
 from backend.openai_utils import stream_critique_from_openai
+from backend.deepseek_utils import stream_critique_from_deepseek
 from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, AUTHOR_JUDGMENT_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
 
 load_dotenv()
@@ -89,6 +91,19 @@ def _pick_provider(preferred: list[tuple[str, callable, str]]):
     provider = fallback[0].removesuffix("_API_KEY").lower()
     logger.info("[AI] provider_selected provider=%s model=%s fallback=true", provider, fallback[2])
     return fallback[1], fallback[2], provider
+
+
+def _pick_random_provider(preferred: list[tuple[str, callable, str]]):
+    available = [item for item in preferred if os.getenv(item[0])]
+    if not available:
+        fallback = preferred[-1]
+        provider = fallback[0].removesuffix("_API_KEY").lower()
+        logger.info("[AI] provider_selected provider=%s model=%s fallback=true", provider, fallback[2])
+        return fallback[1], fallback[2], provider
+    candidate = random.choice(available)
+    provider = candidate[0].removesuffix("_API_KEY").lower()
+    logger.info("[AI] provider_selected provider=%s model=%s random=true", provider, candidate[2])
+    return candidate[1], candidate[2], provider
 
 
 async def _trace_ai_response(stream, provider: str, model: str):
@@ -1128,11 +1143,12 @@ async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
         author_personality=author["personality"],
         peer_context=peer_context,
     )
-    # L'auteur est le rôle le plus exigeant en fidélité stylistique : on préfère Opus, puis GPT, puis Mistral.
-    stream_fn, model, provider = _pick_provider([
-        ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_BEST_MODEL),
-        ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_BEST_MODEL),
+    # L'auteur est le rôle le plus exigeant en fidélité stylistique : on choisit au hasard entre les meilleurs modèles disponibles.
+    stream_fn, model, provider = _pick_random_provider([
+        ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
+        ("DEEPSEEK_API_KEY", stream_critique_from_deepseek, "deepseek-v4-pro"),
         ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_BEST_MODEL),
+        ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
     ])
     return StreamingResponse(
         _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
@@ -1173,11 +1189,10 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
 
     async def stream_with_header():
         yield f"*🧑‍🎓 {', '.join(chosen_names)} lisent votre texte…*\n\n---\n\n"
-        # Le panel d'élèves n'a pas besoin du modèle le plus coûteux : dialogues courts et casual.
         async for chunk in _trace_ai_response(
-            stream_critique_from_mistral(request.text, panel_system, model=MISTRAL_MEDIUM_MODEL),
+            stream_critique_from_mistral(request.text, panel_system, model=MISTRAL_BEST_MODEL),
             "mistral",
-            MISTRAL_MEDIUM_MODEL,
+            MISTRAL_BEST_MODEL,
         ):
             yield chunk
 

@@ -39,7 +39,7 @@ OPENAI_FAST_AGENT = _provider_model("openai", OPENAI_FAST_MODEL)
 OPENAI_REASONING_AGENT = _provider_model("openai", OPENAI_REASONING_MODEL)
 
 # Anthropic
-ANTHROPIC_BEST_MODEL = "claude-opus-5"
+ANTHROPIC_BEST_MODEL = "claude-sonnet-5"
 ANTHROPIC_MEDIUM_MODEL = "claude-sonnet-5"
 ANTHROPIC_FALLBACK_MODEL = "claude-sonnet-4-5"
 ANTHROPIC_FAST_MODEL = "claude-haiku-4-5"

@@ -177,6 +177,7 @@ export default function ApprendsPage() {
   const [loadingLessonIndex, setLoadingLessonIndex] = useState<number | null>(null);
   const [showLesson, setShowLesson] = useState(false);
   const [isLoadingSelectedLesson, setIsLoadingSelectedLesson] = useState(false);
+  const [isWritingFullscreen, setIsWritingFullscreen] = useState(false);
   const [exerciseAuthors, setExerciseAuthors] = useState<{ id: string; name: string }[]>([]);
   const [isLoadingAuthorJudgment, setIsLoadingAuthorJudgment] = useState(false);
   const [feedbackTab, setFeedbackTab] = useState<'latest' | 'history'>('latest');
@@ -706,265 +707,329 @@ export default function ApprendsPage() {
             </button>
           </div>
           <div ref={mainContentRef} className="flex-1 flex overflow-hidden">
-            {/* Writing column */}
-            <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${editorWidth}%` }}>
-              <div className="px-6 py-4 border-b border-[var(--border-subtle)] overflow-y-auto max-h-64">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-2xl font-semibold text-[var(--text-primary)] leading-snug">
-                      {extractTitle(selected.promptMarkdown)}
-                    </h1>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {extractField(selected.promptMarkdown, 'Type') && (
-                        <span className="px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold uppercase tracking-wide">
-                          {extractField(selected.promptMarkdown, 'Type')}
-                        </span>
-                      )}
-                      {extractField(selected.promptMarkdown, 'Genre') && (
-                        <span className="px-2 py-0.5 rounded-full bg-[var(--accent-3)]/15 text-[var(--accent-3)] text-[10px] font-semibold uppercase tracking-wide">
-                          {extractField(selected.promptMarkdown, 'Genre')}
-                        </span>
-                      )}
+            {isWritingFullscreen ? (
+              <div className="flex-1 flex flex-col overflow-hidden bg-[var(--bg-primary)]">
+                <div className="flex-shrink-0 px-5 py-3 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <button
+                      onClick={() => setIsWritingFullscreen(false)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                    >
+                      ↩ Revenir à l&apos;interface
+                    </button>
+                    <span className="truncate text-sm font-medium text-[var(--text-secondary)]">{extractTitle(selected.promptMarkdown)}</span>
+                  </div>
+                  {editorRef.current && (
+                    <EditorToolbar editor={editorRef.current} wordCount={`${wordCount} mots`} />
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                  <RichEditor
+                    content={content}
+                    onUpdate={persistContent}
+                    onSelectionAssist={handleSelectionAssist}
+                    editorRef={editorRef}
+                    placeholder="Écrivez votre réponse à l'exercice…"
+                    wrapperClassName="editor-area min-h-full"
+                    className="px-10 py-8 focus:outline-none min-h-full"
+                  />
+                </div>
+
+                <div className="px-6 py-4 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] flex flex-wrap gap-2">
+                  <button
+                    onClick={handlePeerReview}
+                    disabled={isLoadingPeers || !htmlToPlainText(content).trim()}
+                    className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingPeers ? 'cursor-wait' : ''}`}
+                  >
+                    {isLoadingPeers ? '⏳ Les élèves lisent…' : '🧑‍🎓 Avis des camarades'}
+                  </button>
+                  <button
+                    onClick={() => askTeacher(true)}
+                    disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
+                    className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent-3)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent-3)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
+                  >
+                    🧑‍🏫 Demander de l&apos;aide au prof
+                  </button>
+                  <button
+                    onClick={() => askTeacher(false)}
+                    disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
+                    className={`px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[#181326] text-base font-bold border border-[var(--accent)] hover:bg-[#d0c4ff] transition-all shadow-[0_4px_16px_rgba(185,167,255,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
+                  >
+                    {isLoadingTeacher ? '⏳ Correction en cours…' : '✅ Terminer (avis du prof)'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Writing column */}
+                <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${editorWidth}%` }}>
+                  <div className="px-6 py-4 border-b border-[var(--border-subtle)] overflow-y-auto max-h-64">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <h1 className="text-2xl font-semibold text-[var(--text-primary)] leading-snug">
+                          {extractTitle(selected.promptMarkdown)}
+                        </h1>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {extractField(selected.promptMarkdown, 'Type') && (
+                            <span className="px-2 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] text-[10px] font-semibold uppercase tracking-wide">
+                              {extractField(selected.promptMarkdown, 'Type')}
+                            </span>
+                          )}
+                          {extractField(selected.promptMarkdown, 'Genre') && (
+                            <span className="px-2 py-0.5 rounded-full bg-[var(--accent-3)]/15 text-[var(--accent-3)] text-[10px] font-semibold uppercase tracking-wide">
+                              {extractField(selected.promptMarkdown, 'Genre')}
+                            </span>
+                          )}
+                        </div>
+                        {extractField(selected.promptMarkdown, 'Objectif pédagogique') && (
+                          <p className="mt-2 text-base leading-relaxed text-[var(--text-secondary)]">
+                            {extractField(selected.promptMarkdown, 'Objectif pédagogique')}
+                          </p>
+                        )}
+                        {!showLesson && (
+                          <div className="mt-4">{renderMarkdown(getExerciseBody(selected.promptMarkdown))}</div>
+                        )}
+                      </div>
                     </div>
-                    {extractField(selected.promptMarkdown, 'Objectif pédagogique') && (
-                      <p className="mt-2 text-base leading-relaxed text-[var(--text-secondary)]">
-                        {extractField(selected.promptMarkdown, 'Objectif pédagogique')}
+                    {showLesson && (
+                      <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]" role="tabpanel">
+                        {isLoadingSelectedLesson && !selected.lesson ? (
+                          <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
+                        ) : (
+                          renderMarkdown(selected.lesson || '')
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] flex items-center justify-between gap-3">
+                    {editorRef.current && (
+                      <EditorToolbar editor={editorRef.current} wordCount={`${wordCount} mots`} />
+                    )}
+                    <button
+                      onClick={() => setIsWritingFullscreen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                      title="Plein écran"
+                    >
+                      ⊞ Plein écran
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto">
+                    <RichEditor
+                      content={content}
+                      onUpdate={persistContent}
+                      onSelectionAssist={handleSelectionAssist}
+                      editorRef={editorRef}
+                      placeholder="Écrivez votre réponse à l'exercice…"
+                      wrapperClassName="editor-area min-h-full"
+                      className="px-8 py-6 focus:outline-none min-h-full"
+                    />
+                  </div>
+
+                  <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex flex-wrap gap-2">
+                    <button
+                      onClick={handlePeerReview}
+                      disabled={isLoadingPeers || !htmlToPlainText(content).trim()}
+                      className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingPeers ? 'cursor-wait' : ''}`}
+                    >
+                      {isLoadingPeers ? '⏳ Les élèves lisent…' : '🧑‍🎓 Avis des camarades'}
+                    </button>
+                    <button
+                      onClick={() => askTeacher(true)}
+                      disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
+                      className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent-3)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent-3)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
+                    >
+                      🧑‍🏫 Demander de l&apos;aide au prof
+                    </button>
+                    <button
+                      onClick={() => askTeacher(false)}
+                      disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
+                      className={`px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[#181326] text-base font-bold border border-[var(--accent)] hover:bg-[#d0c4ff] transition-all shadow-[0_4px_16px_rgba(185,167,255,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
+                    >
+                      {isLoadingTeacher ? '⏳ Correction en cours…' : '✅ Terminer (avis du prof)'}
+                    </button>
+                    {selected.authorId && (
+                      <button
+                        onClick={fetchAuthorJudgment}
+                        disabled={isLoadingAuthorJudgment || !htmlToPlainText(content).trim()}
+                        title={`${selected.authorName} juge votre texte, avec sa vraie personnalité et son style`}
+                        className={`px-4 py-2 rounded-lg bg-[var(--accent-3)]/10 hover:bg-[var(--accent-3)]/20 text-[var(--accent-3)] text-base font-medium border border-[var(--accent-3)]/30 transition-all ${isLoadingAuthorJudgment ? 'opacity-50 cursor-wait' : ''}`}
+                      >
+                        {isLoadingAuthorJudgment ? '⏳ …' : `🖋️ Avis de ${selected.authorName}`}
+                      </button>
+                    )}
+                  </div>
+                  {error && (
+                    <div className="px-6 pb-4 text-sm text-red-400">{error}</div>
+                  )}
+                </div>
+
+                {isDragging && (
+                  <div className="fixed inset-0 z-50" style={{ cursor: 'col-resize' }} />
+                )}
+
+                <div
+                  className="flex-shrink-0"
+                  style={{
+                    width: '12px',
+                    height: '100%',
+                    cursor: 'col-resize',
+                    backgroundColor: isDragging ? 'var(--accent)' : 'var(--border-medium)',
+                    position: 'relative',
+                    zIndex: 10,
+                    transition: 'background-color 0.15s',
+                  }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setIsDragging(true);
+                  }}
+                  onMouseEnter={(event) => {
+                    if (!isDragging) event.currentTarget.style.backgroundColor = 'var(--accent)';
+                  }}
+                  onMouseLeave={(event) => {
+                    if (!isDragging) event.currentTarget.style.backgroundColor = 'var(--border-medium)';
+                  }}
+                  aria-label="Redimensionner les zones d'écriture et de retours"
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      width: '4px',
+                      height: '48px',
+                      transform: 'translate(-50%, -50%)',
+                      borderLeft: '2px dotted var(--text-muted)',
+                      borderRight: '2px dotted var(--text-muted)',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                </div>
+
+                {/* Feedback column */}
+                <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${100 - editorWidth}%` }}>
+                  <div className="flex-shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border-medium)] bg-[var(--bg-secondary)]" role="tablist" aria-label="Retours">
+                    <button
+                      onClick={() => setFeedbackTab('latest')}
+                      className={`workshop-tab ${feedbackTab === 'latest' ? 'workshop-tab-active' : ''}`}
+                      role="tab"
+                      aria-selected={feedbackTab === 'latest'}
+                    >
+                      💬 Derniers avis
+                    </button>
+                    <button
+                      onClick={() => setFeedbackTab('history')}
+                      className={`workshop-tab ${feedbackTab === 'history' ? 'workshop-tab-active' : ''}`}
+                      role="tab"
+                      aria-selected={feedbackTab === 'history'}
+                    >
+                      🗂️ Historique
+                      {selected.commentHistory.length > 0 && (
+                        <span className="workshop-tab-badge">{selected.commentHistory.length}</span>
+                      )}
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+                    {feedbackTab === 'history' ? (
+                      selected.commentHistory.length > 0 ? (
+                        [...selected.commentHistory].reverse().map(comment => (
+                          <div key={comment.id} className="border-b border-[var(--border-subtle)] pb-5 last:border-0">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <h2 className={`text-xs font-semibold tracking-widest uppercase ${comment.source === 'teacher' ? 'text-[var(--accent)]' : comment.source === 'author' ? 'text-[var(--accent-3)]' : 'text-[var(--text-primary)]'}`}>
+                                {comment.source === 'teacher' ? `Avis de ${teacherName}` : comment.source === 'author' ? `Avis de ${selected.authorName || 'l’auteur'}` : 'Avis des camarades'}
+                              </h2>
+                              <time className="text-xs text-[var(--text-muted)]" dateTime={new Date(comment.createdAt).toISOString()}>
+                                {new Date(comment.createdAt).toLocaleDateString('fr-FR')}
+                              </time>
+                            </div>
+                            <div className="critique-content">{renderMarkdown(comment.content)}</div>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedCommentVersions(previous => {
+                                const next = new Set(previous);
+                                if (next.has(comment.id)) next.delete(comment.id);
+                                else next.add(comment.id);
+                                return next;
+                              })}
+                              className={`mt-3 inline-flex max-w-full items-center rounded-md border px-3 py-2 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] ${expandedCommentVersions.has(comment.id) ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027]' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'}`}
+                              aria-expanded={expandedCommentVersions.has(comment.id)}
+                            >
+                              {expandedCommentVersions.has(comment.id) ? 'Masquer la version commentée' : 'Voir la version commentée'}
+                            </button>
+                            {expandedCommentVersions.has(comment.id) && (
+                              <div className="mt-3 rounded-md border border-[var(--border-medium)] bg-[var(--bg-surface)] p-3">
+                                <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+                                  Version envoyée
+                                </div>
+                                {comment.textSnapshot ? (
+                                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">
+                                    {comment.textSnapshot}
+                                  </p>
+                                ) : (
+                                  <p className="text-sm italic text-[var(--text-muted)]">
+                                    Cette ancienne entrée ne contient pas encore la version du texte commenté.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-base text-[var(--text-muted)] text-center mt-10">
+                          Aucun ancien commentaire pour cet exercice.
+                        </p>
+                      )
+                    ) : (
+                      <>
+                    {selected.peerComments && (
+                      <div>
+                        <h2 className="text-[var(--text-muted)] text-xs font-semibold tracking-widest uppercase mb-2">
+                          Avis des camarades
+                        </h2>
+                        <div className="critique-content">{renderMarkdown(selected.peerComments)}</div>
+                      </div>
+                    )}
+                    {selected.teacherCritique && (
+                      <div>
+                        <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
+                          Avis de {teacherName}
+                        </h2>
+                        <div className="critique-content">{renderMarkdown(selected.teacherCritique)}</div>
+                      </div>
+                    )}
+                    {selected.authorJudgment && (
+                      <div>
+                        <h2 className="text-[var(--accent-3)] text-xs font-semibold tracking-widest uppercase mb-2">
+                          🖋️ Jugement de {selected.authorName}
+                        </h2>
+                        <div className="critique-content">{renderMarkdown(selected.authorJudgment)}</div>
+                      </div>
+                    )}
+                    {selected.synthesis && (
+                      <div>
+                        <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
+                          📘 Ajouté au carnet de suivi
+                        </h2>
+                        <div className="critique-content rounded-lg border border-[var(--accent)]/20 bg-[var(--accent-soft)] p-3">
+                          {renderMarkdown(selected.synthesis)}
+                        </div>
+                      </div>
+                    )}
+                    {!selected.peerComments && !selected.teacherCritique && !selected.authorJudgment && (
+                      <p className="text-base text-[var(--text-muted)] text-center mt-10">
+                        Écrivez votre texte puis demandez l&apos;avis de vos camarades ou du professeur.
                       </p>
                     )}
-                    {!showLesson && (
-                      <div className="mt-4">{renderMarkdown(getExerciseBody(selected.promptMarkdown))}</div>
+                      </>
                     )}
                   </div>
                 </div>
-                {showLesson && (
-                  <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]" role="tabpanel">
-                    {isLoadingSelectedLesson && !selected.lesson ? (
-                      <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
-                    ) : (
-                      renderMarkdown(selected.lesson || '')
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-                {editorRef.current && (
-                  <EditorToolbar editor={editorRef.current} wordCount={`${wordCount} mots`} />
-                )}
-              </div>
-
-              <div className="flex-1 overflow-y-auto">
-                <RichEditor
-                  content={content}
-                  onUpdate={persistContent}
-                  onSelectionAssist={handleSelectionAssist}
-                  editorRef={editorRef}
-                  placeholder="Écrivez votre réponse à l'exercice…"
-                  wrapperClassName="editor-area min-h-full"
-                  className="px-8 py-6 focus:outline-none min-h-full"
-                />
-              </div>
-
-              <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex flex-wrap gap-2">
-                <button
-                  onClick={handlePeerReview}
-                  disabled={isLoadingPeers || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingPeers ? 'cursor-wait' : ''}`}
-                >
-                  {isLoadingPeers ? '⏳ Les élèves lisent…' : '🧑‍🎓 Avis des camarades'}
-                </button>
-                <button
-                  onClick={() => askTeacher(true)}
-                  disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--accent-3)]/15 text-[var(--text-primary)] text-base font-semibold border border-[var(--border-medium)] hover:border-[var(--accent-3)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
-                >
-                  🧑‍🏫 Demander de l&apos;aide au prof
-                </button>
-                <button
-                  onClick={() => askTeacher(false)}
-                  disabled={isLoadingTeacher || !htmlToPlainText(content).trim()}
-                  className={`px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[#181326] text-base font-bold border border-[var(--accent)] hover:bg-[#d0c4ff] transition-all shadow-[0_4px_16px_rgba(185,167,255,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${isLoadingTeacher ? 'cursor-wait' : ''}`}
-                >
-                  {isLoadingTeacher ? '⏳ Correction en cours…' : '✅ Terminer (avis du prof)'}
-                </button>
-                {selected.authorId && (
-                  <button
-                    onClick={fetchAuthorJudgment}
-                    disabled={isLoadingAuthorJudgment || !htmlToPlainText(content).trim()}
-                    title={`${selected.authorName} juge votre texte, avec sa vraie personnalité et son style`}
-                    className={`px-4 py-2 rounded-lg bg-[var(--accent-3)]/10 hover:bg-[var(--accent-3)]/20 text-[var(--accent-3)] text-base font-medium border border-[var(--accent-3)]/30 transition-all ${isLoadingAuthorJudgment ? 'opacity-50 cursor-wait' : ''}`}
-                  >
-                    {isLoadingAuthorJudgment ? '⏳ …' : `🖋️ Avis de ${selected.authorName}`}
-                  </button>
-                )}
-              </div>
-              {error && (
-                <div className="px-6 pb-4 text-sm text-red-400">{error}</div>
-              )}
-            </div>
-
-            {isDragging && (
-              <div className="fixed inset-0 z-50" style={{ cursor: 'col-resize' }} />
+              </>
             )}
-
-            <div
-              className="flex-shrink-0"
-              style={{
-                width: '12px',
-                height: '100%',
-                cursor: 'col-resize',
-                backgroundColor: isDragging ? 'var(--accent)' : 'var(--border-medium)',
-                position: 'relative',
-                zIndex: 10,
-                transition: 'background-color 0.15s',
-              }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setIsDragging(true);
-              }}
-              onMouseEnter={(event) => {
-                if (!isDragging) event.currentTarget.style.backgroundColor = 'var(--accent)';
-              }}
-              onMouseLeave={(event) => {
-                if (!isDragging) event.currentTarget.style.backgroundColor = 'var(--border-medium)';
-              }}
-              aria-label="Redimensionner les zones d'écriture et de retours"
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  width: '4px',
-                  height: '48px',
-                  transform: 'translate(-50%, -50%)',
-                  borderLeft: '2px dotted var(--text-muted)',
-                  borderRight: '2px dotted var(--text-muted)',
-                  pointerEvents: 'none',
-                }}
-              />
-            </div>
-
-            {/* Feedback column */}
-            <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: `${100 - editorWidth}%` }}>
-              <div className="flex-shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border-medium)] bg-[var(--bg-secondary)]" role="tablist" aria-label="Retours">
-                <button
-                  onClick={() => setFeedbackTab('latest')}
-                  className={`workshop-tab ${feedbackTab === 'latest' ? 'workshop-tab-active' : ''}`}
-                  role="tab"
-                  aria-selected={feedbackTab === 'latest'}
-                >
-                  💬 Derniers avis
-                </button>
-                <button
-                  onClick={() => setFeedbackTab('history')}
-                  className={`workshop-tab ${feedbackTab === 'history' ? 'workshop-tab-active' : ''}`}
-                  role="tab"
-                  aria-selected={feedbackTab === 'history'}
-                >
-                  🗂️ Historique
-                  {selected.commentHistory.length > 0 && (
-                    <span className="workshop-tab-badge">{selected.commentHistory.length}</span>
-                  )}
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
-                {feedbackTab === 'history' ? (
-                  selected.commentHistory.length > 0 ? (
-                    [...selected.commentHistory].reverse().map(comment => (
-                      <div key={comment.id} className="border-b border-[var(--border-subtle)] pb-5 last:border-0">
-                        <div className="flex items-center justify-between gap-3 mb-2">
-                          <h2 className={`text-xs font-semibold tracking-widest uppercase ${comment.source === 'teacher' ? 'text-[var(--accent)]' : comment.source === 'author' ? 'text-[var(--accent-3)]' : 'text-[var(--text-primary)]'}`}>
-                            {comment.source === 'teacher' ? `Avis de ${teacherName}` : comment.source === 'author' ? `Avis de ${selected.authorName || 'l’auteur'}` : 'Avis des camarades'}
-                          </h2>
-                          <time className="text-xs text-[var(--text-muted)]" dateTime={new Date(comment.createdAt).toISOString()}>
-                            {new Date(comment.createdAt).toLocaleDateString('fr-FR')}
-                          </time>
-                        </div>
-                        <div className="critique-content">{renderMarkdown(comment.content)}</div>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedCommentVersions(previous => {
-                            const next = new Set(previous);
-                            if (next.has(comment.id)) next.delete(comment.id);
-                            else next.add(comment.id);
-                            return next;
-                          })}
-                          className={`mt-3 inline-flex max-w-full items-center rounded-md border px-3 py-2 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] ${expandedCommentVersions.has(comment.id) ? 'border-[var(--accent-3)] bg-[var(--accent-3)] text-[#172027]' : 'border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent-3)] hover:bg-[var(--accent-3)]/15'}`}
-                          aria-expanded={expandedCommentVersions.has(comment.id)}
-                        >
-                          {expandedCommentVersions.has(comment.id) ? 'Masquer la version commentée' : 'Voir la version commentée'}
-                        </button>
-                        {expandedCommentVersions.has(comment.id) && (
-                          <div className="mt-3 rounded-md border border-[var(--border-medium)] bg-[var(--bg-surface)] p-3">
-                            <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
-                              Version envoyée
-                            </div>
-                            {comment.textSnapshot ? (
-                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">
-                                {comment.textSnapshot}
-                              </p>
-                            ) : (
-                              <p className="text-sm italic text-[var(--text-muted)]">
-                                Cette ancienne entrée ne contient pas encore la version du texte commenté.
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-base text-[var(--text-muted)] text-center mt-10">
-                      Aucun ancien commentaire pour cet exercice.
-                    </p>
-                  )
-                ) : (
-                  <>
-                {selected.peerComments && (
-                  <div>
-                    <h2 className="text-[var(--text-muted)] text-xs font-semibold tracking-widest uppercase mb-2">
-                      Avis des camarades
-                    </h2>
-                    <div className="critique-content">{renderMarkdown(selected.peerComments)}</div>
-                  </div>
-                )}
-                {selected.teacherCritique && (
-                  <div>
-                    <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
-                      Avis de {teacherName}
-                    </h2>
-                    <div className="critique-content">{renderMarkdown(selected.teacherCritique)}</div>
-                  </div>
-                )}
-                {selected.authorJudgment && (
-                  <div>
-                    <h2 className="text-[var(--accent-3)] text-xs font-semibold tracking-widest uppercase mb-2">
-                      🖋️ Jugement de {selected.authorName}
-                    </h2>
-                    <div className="critique-content">{renderMarkdown(selected.authorJudgment)}</div>
-                  </div>
-                )}
-                {selected.synthesis && (
-                  <div>
-                    <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
-                      📘 Ajouté au carnet de suivi
-                    </h2>
-                    <div className="critique-content rounded-lg border border-[var(--accent)]/20 bg-[var(--accent-soft)] p-3">
-                      {renderMarkdown(selected.synthesis)}
-                    </div>
-                  </div>
-                )}
-                {!selected.peerComments && !selected.teacherCritique && !selected.authorJudgment && (
-                  <p className="text-base text-[var(--text-muted)] text-center mt-10">
-                    Écrivez votre texte puis demandez l&apos;avis de vos camarades ou du professeur.
-                  </p>
-                )}
-                  </>
-                )}
-              </div>
-            </div>
           </div>
           </>
         )}
