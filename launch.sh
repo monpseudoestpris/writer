@@ -54,14 +54,14 @@ if [[ -f "$ENV_FILE" ]]; then
     ok ".env file found"
     # shellcheck disable=SC1090
     source "$ENV_FILE"
-    if [[ -n "${MISTRAL_API_KEY:-}" ]]; then
-        ok "MISTRAL_API_KEY is set"
+    if [[ -n "${OPENROUTER:-}" ]]; then
+        ok "OPENROUTER is set"
     else
-        fail "MISTRAL_API_KEY is empty or missing in .env"
+        fail "OPENROUTER is empty or missing in .env"
         ERRORS=$((ERRORS + 1))
     fi
 else
-    fail ".env file not found — create one with MISTRAL_API_KEY=<your key>"
+    fail ".env file not found — create one with OPENROUTER=<your key>"
     ERRORS=$((ERRORS + 1))
 fi
 

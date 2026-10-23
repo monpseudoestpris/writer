@@ -12,7 +12,7 @@ An AI-powered writing assistant that provides critiques from famous personalitie
 ## Technologies Used
 
 - **Frontend:** Next.js, React, TypeScript, Tailwind CSS
-- **Backend:** FastAPI, Python, Mistral API
+- **Backend:** FastAPI, Python, OpenRouter API
 - **Containerization:** Docker, Docker Compose
 
 ## Setup and Running
@@ -23,12 +23,12 @@ An AI-powered writing assistant that provides critiques from famous personalitie
     cd Writer
     ```
 
-2.  **Set up Mistral API Key:**
-    Create a `.env` file in the root directory of the project (where `docker-compose.yml` is located) and add your Mistral API key:
+2.  **Set up OpenRouter API Key:**
+    Create a `.env` file in the root directory of the project (where `docker-compose.yml` is located) and add your OpenRouter API key:
     ```
-    MISTRAL_API_KEY=your_mistral_api_key_here
+    OPENROUTER=your_openrouter_api_key_here
     ```
-    You can get your API key from [Mistral AI](https://docs.mistral.ai/).
+    You can get your API key from [OpenRouter](https://openrouter.ai/settings/keys).
 
 3.  **Build and run with Docker Compose:**
     ```bash
@@ -55,7 +55,7 @@ The backend is built with FastAPI.
     pip install -r requirements.txt
     uvicorn main:app --reload
     ```
-    (Ensure `MISTRAL_API_KEY` is set in your environment or a `.env` file in the `backend` directory)
+    (Ensure `OPENROUTER` is set in your environment or a `.env` file in the `backend` directory)
 
 ### Frontend
 
@@ -164,3 +164,22 @@ For open source projects, say how it is licensed.
 ## Project status
 If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
 >>>>>>> origin/main
+
+
+## Centralized AI access with OpenRouter
+
+All AI requests (critiques, exercises, summaries, chat and document comments)
+use `https://openrouter.ai/api/v1` with the single server-side `OPENROUTER`
+environment variable. Direct Mistral, OpenAI, Anthropic and DeepSeek keys are
+no longer required. Set `OPENROUTER=your_key` in the root `.env`, then recreate
+the backend with `docker compose up -d --build backend`.
+
+`backend/ai_models.py` keeps the model roles and their explicit
+`OPENROUTER_MODEL_IDS` mapping. Provider names and version punctuation can
+differ on OpenRouter; use IDs from https://openrouter.ai/models.
+The author review still randomly chooses a model family; the teacher uses the
+first preferred model. These choices no longer depend on individual provider keys.
+`GET /config` reports `openrouter_api_key_set` without exposing the key.
+
+From the project root, a local backend can be started with
+`python -m uvicorn backend.main:app --reload`.

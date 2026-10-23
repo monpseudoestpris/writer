@@ -1,7 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import Depends, HTTPException, FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
+from pathlib import Path
 import os
 import re
 import random
@@ -12,13 +13,14 @@ from backend.mistral_utils import stream_critique_from_mistral, summarize_critiq
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 from backend.students import STUDENTS, STUDENT_IDS, TEACHER_NAME, TEACHER_PROMPT, get_students_list
 from backend.auteurs import AUTHORS, get_author_for_genre
-from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, MISTRAL_FAST_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL
+from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, MISTRAL_FAST_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL, DEEPSEEK_BEST_MODEL
+from backend.openrouter_utils import get_openrouter_api_key
 from backend.anthropic_utils import stream_critique_from_anthropic
 from backend.openai_utils import stream_critique_from_openai
 from backend.deepseek_utils import stream_critique_from_deepseek
 from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, AUTHOR_JUDGMENT_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 logger = logging.getLogger(__name__)
 backend_logger = logging.getLogger("backend")
@@ -73,37 +75,27 @@ async def ping():
 
 @app.get("/config")
 async def get_config():
-    return {
-        "mistral_api_key_set": bool(os.getenv("MISTRAL_API_KEY")),
-        "anthropic_api_key_set": bool(os.getenv("ANTHROPIC_API_KEY")),
-        "openai_api_key_set": bool(os.getenv("OPENAI_API_KEY")),
-    }
+    return {"openrouter_api_key_set": bool(os.getenv("OPENROUTER", "").strip())}
 
 
-# Choisit le meilleur fournisseur dispo (clé API présente), avec repli sur Mistral en dernier recours.
+def _require_openrouter():
+    try:
+        get_openrouter_api_key()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 def _pick_provider(preferred: list[tuple[str, callable, str]]):
-    for env_var, stream_fn, model in preferred:
-        if os.getenv(env_var):
-            provider = env_var.removesuffix("_API_KEY").lower()
-            logger.info("[AI] provider_selected provider=%s model=%s", provider, model)
-            return stream_fn, model, provider
-    fallback = preferred[-1]
-    provider = fallback[0].removesuffix("_API_KEY").lower()
-    logger.info("[AI] provider_selected provider=%s model=%s fallback=true", provider, fallback[2])
-    return fallback[1], fallback[2], provider
+    """All model families are available through the same OpenRouter key."""
+    _require_openrouter()
+    _, stream_fn, model = preferred[0]
+    return stream_fn, model, "openrouter"
 
 
 def _pick_random_provider(preferred: list[tuple[str, callable, str]]):
-    available = [item for item in preferred if os.getenv(item[0])]
-    if not available:
-        fallback = preferred[-1]
-        provider = fallback[0].removesuffix("_API_KEY").lower()
-        logger.info("[AI] provider_selected provider=%s model=%s fallback=true", provider, fallback[2])
-        return fallback[1], fallback[2], provider
-    candidate = random.choice(available)
-    provider = candidate[0].removesuffix("_API_KEY").lower()
-    logger.info("[AI] provider_selected provider=%s model=%s random=true", provider, candidate[2])
-    return candidate[1], candidate[2], provider
+    _require_openrouter()
+    _, stream_fn, model = random.choice(preferred)
+    return stream_fn, model, "openrouter"
 
 
 async def _trace_ai_response(stream, provider: str, model: str):
@@ -127,7 +119,7 @@ async def _trace_ai_response(stream, provider: str, model: str):
 async def get_reviewers():
     return [{"id": k, "name": REVIEWER_NAMES.get(k, k)} for k in REVIEWER_PROMPTS.keys()]
 
-@app.post("/review")
+@app.post("/review", dependencies=[Depends(_require_openrouter)])
 async def review_text(request: ReviewRequest):
     if request.reviewer not in REVIEWER_PROMPTS:
         async def error_stream():
@@ -181,7 +173,7 @@ async def review_text(request: ReviewRequest):
     )
 
 
-@app.post("/summarize-critique")
+@app.post("/summarize-critique", dependencies=[Depends(_require_openrouter)])
 async def summarize_critique_endpoint(request: SummarizeRequest):
     try:
         summary = await summarize_single_critique(request.critique)
@@ -190,7 +182,7 @@ async def summarize_critique_endpoint(request: SummarizeRequest):
         return {"summary": "", "error": str(e)}
 
 
-@app.post("/summarize-text")
+@app.post("/summarize-text", dependencies=[Depends(_require_openrouter)])
 async def summarize_text_endpoint(request: SummarizeTextRequest):
     try:
         summary = await summarize_text(request.text)
@@ -199,7 +191,7 @@ async def summarize_text_endpoint(request: SummarizeTextRequest):
         return {"summary": "", "error": str(e)}
 
 
-@app.post("/review-dialogue")
+@app.post("/review-dialogue", dependencies=[Depends(_require_openrouter)])
 async def review_dialogue(request: DialogueRequest):
     import random
     
@@ -250,7 +242,7 @@ async def review_dialogue(request: DialogueRequest):
     )
 
 
-@app.post("/review-readers")
+@app.post("/review-readers", dependencies=[Depends(_require_openrouter)])
 async def review_readers(request: ReadersReviewRequest):
     """Panel de lecteurs aléatoires qui donnent leur avis."""
     readers_system = READERS_PANEL_PROMPT.format(nb_readers=request.num_readers)
@@ -272,7 +264,7 @@ async def review_readers(request: ReadersReviewRequest):
     )
 
 
-@app.post("/world-building/feedback")
+@app.post("/world-building/feedback", dependencies=[Depends(_require_openrouter)])
 async def world_building_feedback(request: WorldBuildingFeedbackRequest):
     prompt_text = WORLD_BUILDING_FEEDBACK_PROMPT.format(
         category=request.category,
@@ -311,7 +303,7 @@ async def world_building_feedback(request: WorldBuildingFeedbackRequest):
     )
 
 
-@app.post("/world-building/readers")
+@app.post("/world-building/readers", dependencies=[Depends(_require_openrouter)])
 async def world_building_readers(request: WBReadersReviewRequest):
     """Panel de lecteurs aléatoires pour le world building."""
     readers_system = WB_READERS_PANEL_PROMPT.format(
@@ -336,7 +328,7 @@ async def world_building_readers(request: WBReadersReviewRequest):
     )
 
 
-@app.post("/review-panel")
+@app.post("/review-panel", dependencies=[Depends(_require_openrouter)])
 async def review_custom_panel(request: PanelReviewRequest):
     """Panel personnalisé d'auteurs choisis par l'utilisateur."""
     # Filter valid reviewer IDs
@@ -385,7 +377,7 @@ async def review_custom_panel(request: PanelReviewRequest):
     )
 
 
-@app.post("/world-building/panel")
+@app.post("/world-building/panel", dependencies=[Depends(_require_openrouter)])
 async def world_building_custom_panel(request: WBPanelReviewRequest):
     """Panel personnalisé d'auteurs pour le world building."""
     chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
@@ -433,7 +425,7 @@ async def world_building_custom_panel(request: WBPanelReviewRequest):
     )
 
 
-@app.post("/review-panel/analyze")
+@app.post("/review-panel/analyze", dependencies=[Depends(_require_openrouter)])
 async def review_panel_analyze(request: PanelAnalyzeRequest):
     """Le panel analyse les retours des lecteurs et propose des modifications."""
     chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
@@ -482,7 +474,7 @@ async def review_panel_analyze(request: PanelAnalyzeRequest):
     )
 
 
-@app.post("/world-building/panel/analyze")
+@app.post("/world-building/panel/analyze", dependencies=[Depends(_require_openrouter)])
 async def wb_panel_analyze(request: WBPanelAnalyzeRequest):
     """Le panel analyse les retours des lecteurs sur le world building."""
     chosen = [rid for rid in request.reviewer_ids if rid in REVIEWER_PROMPTS]
@@ -531,7 +523,7 @@ async def wb_panel_analyze(request: WBPanelAnalyzeRequest):
     )
 
 
-@app.post("/world-building/autofill")
+@app.post("/world-building/autofill", dependencies=[Depends(_require_openrouter)])
 async def world_building_autofill(request: WorldBuildingAutoFillRequest):
     # Find the right prompt for this category
     category_key = request.category.lower()
@@ -570,9 +562,9 @@ async def world_building_autofill(request: WorldBuildingAutoFillRequest):
     )
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(_require_openrouter)])
 async def chat_with_reviewer(request: ChatRequest):
-    """Chat multi-tour avec un auteur ou un panel, avec prompt caching Mistral."""
+    """Chat multi-tour avec un auteur ou un panel, via OpenRouter."""
     
     # Build system prompt based on who we're chatting with
     if request.reviewer_ids and len(request.reviewer_ids) > 0:
@@ -635,7 +627,7 @@ async def chat_with_reviewer(request: ChatRequest):
     if request.all_entries_context:
         system_prompt += f"\nAUTRES ÉLÉMENTS DE L'UNIVERS :\n{request.all_entries_context}"
     
-    # Build messages array for Mistral (prefix stays stable for caching)
+    # Build conversation messages for OpenRouter
     messages = [{"role": "system", "content": system_prompt}]
     
     # First user message: the original text
@@ -654,7 +646,7 @@ async def chat_with_reviewer(request: ChatRequest):
     messages.append({"role": "assistant", "content": request.initial_feedback})
     
     # Inject accumulated summaries of past exchanges (if any)
-    # The prefix above (system + text + critique) stays identical → Mistral caches it
+    # Keep the shared conversation prefix stable for provider-side caching
     if request.chat_summaries and len(request.chat_summaries) > 0:
         summaries_text = "\n\n---\n\n".join(
             f"**Résumé échange {i+1} :** {s}"
@@ -677,7 +669,7 @@ async def chat_with_reviewer(request: ChatRequest):
     )
 
 
-@app.post("/rewrite")
+@app.post("/rewrite", dependencies=[Depends(_require_openrouter)])
 async def rewrite_text(request: RewriteRequest):
     """Stream a rewritten version of the text from a reviewer."""
     import random
@@ -742,7 +734,7 @@ async def rewrite_text(request: RewriteRequest):
     )
 
 
-@app.post("/selection-assist")
+@app.post("/selection-assist", dependencies=[Depends(_require_openrouter)])
 async def selection_assist(request: SelectionAssistRequest):
     action_instructions = {
         "synonyms": "Propose 5 synonymes ou expressions proches, adaptés au sens et au registre. Réponds uniquement avec une liste JSON de chaînes.",
@@ -772,7 +764,7 @@ async def selection_assist(request: SelectionAssistRequest):
     return {"suggestions": [str(item) for item in suggestions[:5]]}
 
 
-@app.post("/chat/summarize")
+@app.post("/chat/summarize", dependencies=[Depends(_require_openrouter)])
 async def summarize_chat(request: ChatSummarizeRequest):
     """Résume un batch de messages de chat via mistral-small."""
     msgs = [{"role": m.role, "content": m.content} for m in request.messages]
@@ -807,7 +799,7 @@ async def import_document(file: UploadFile = File(...)):
     return result
 
 
-@app.post("/review-document")
+@app.post("/review-document", dependencies=[Depends(_require_openrouter)])
 async def review_document(file: UploadFile = File(...), reviewer: str = Form("prof_ecriture"), context: str = Form("")):
     """Importe un document et produit un .docx commenté avec des annotations Word."""
     from backend.document_import import extract_structured_text
@@ -1057,7 +1049,7 @@ def _build_student_record(past_syntheses: list[dict] | None) -> str:
     )
 
 
-@app.post("/classroom/exercise")
+@app.post("/classroom/exercise", dependencies=[Depends(_require_openrouter)])
 async def classroom_exercise(request: ClassroomExerciseRequest):
     """Le professeur propose 3 exercices d'écriture différents, parmi lesquels l'élève choisit."""
     logger.info(
@@ -1104,7 +1096,7 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
     return {"exercises": exercises, "authors": authors}
 
 
-@app.post("/classroom/lesson")
+@app.post("/classroom/lesson", dependencies=[Depends(_require_openrouter)])
 async def classroom_lesson(request: ClassroomLessonRequest):
     """Le professeur donne un petit cours (bases + exemples) pour préparer l'élève à un exercice précis."""
     system_prompt = LESSON_PROMPT.format(
@@ -1119,7 +1111,7 @@ async def classroom_lesson(request: ClassroomLessonRequest):
     )
 
 
-@app.post("/classroom/author-judgment")
+@app.post("/classroom/author-judgment", dependencies=[Depends(_require_openrouter)])
 async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
     """Un grand auteur (réel, passé ou présent) juge le travail de l'élève avec sa vraie personnalité."""
     author = AUTHORS.get(request.author_id)
@@ -1145,10 +1137,10 @@ async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
     )
     # L'auteur est le rôle le plus exigeant en fidélité stylistique : on choisit au hasard entre les meilleurs modèles disponibles.
     stream_fn, model, provider = _pick_random_provider([
-        ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
-        ("DEEPSEEK_API_KEY", stream_critique_from_deepseek, "deepseek-v4-pro"),
-        ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_BEST_MODEL),
-        ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
+        ("anthropic", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
+        ("deepseek", stream_critique_from_deepseek, DEEPSEEK_BEST_MODEL),
+        ("mistral", stream_critique_from_mistral, MISTRAL_BEST_MODEL),
+        ("openai", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
     ])
     return StreamingResponse(
         _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
@@ -1156,7 +1148,7 @@ async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
     )
 
 
-@app.post("/classroom/peer-review")
+@app.post("/classroom/peer-review", dependencies=[Depends(_require_openrouter)])
 async def classroom_peer_review(request: ClassroomPeerReviewRequest):
     """Un groupe d'élèves commente le travail rendu par l'utilisateur."""
     import random
@@ -1203,7 +1195,7 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
     )
 
 
-@app.post("/classroom/teacher-critique")
+@app.post("/classroom/teacher-critique", dependencies=[Depends(_require_openrouter)])
 async def classroom_teacher_critique(request: ClassroomTeacherRequest):
     """Le professeur critique le travail de l'élève (bilan final ou aide à la demande)."""
     revision_note = TEACHER_REVISION_NOTE if request.text_changed_since_peer_review else ""
@@ -1230,9 +1222,9 @@ async def classroom_teacher_critique(request: ClassroomTeacherRequest):
     )
 
     stream_fn, model, provider = _pick_provider([
-        ("ANTHROPIC_API_KEY", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
-        ("OPENAI_API_KEY", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
-        ("MISTRAL_API_KEY", stream_critique_from_mistral, MISTRAL_MEDIUM_MODEL),
+        ("anthropic", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
+        ("openai", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
+        ("mistral", stream_critique_from_mistral, MISTRAL_MEDIUM_MODEL),
     ])
     return StreamingResponse(
         _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
@@ -1240,7 +1232,7 @@ async def classroom_teacher_critique(request: ClassroomTeacherRequest):
     )
 
 
-@app.post("/classroom/synthesize")
+@app.post("/classroom/synthesize", dependencies=[Depends(_require_openrouter)])
 async def classroom_synthesize(request: ClassroomSynthesisRequest):
     """Génère la synthèse +/- de fin d'exercice à conserver dans le carnet de suivi de l'élève."""
     system_prompt = SYNTHESIS_PROMPT.format(

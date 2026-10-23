@@ -1,25 +1,25 @@
 @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Source+Sans+3:wght@400;500;600;700;800&display=swap');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(".");
+@import "./design.css";
 
 :root {
-  --bg-primary: #17191f;
-  --bg-secondary: #20232b;
-  --bg-elevated: #292d37;
-  --bg-surface: #323744;
-  --border-subtle: rgba(255, 255, 255, 0.14);
-  --border-medium: rgba(255, 255, 255, 0.24);
-  --accent: #8de1ed;
-  --accent-2: #ff9b7a;
-  --accent-3: #b7d4ff;
-  --accent-soft: rgba(141, 225, 237, 0.16);
-  --accent-glow: rgba(141, 225, 237, 0.12);
+  color-scheme: dark;
+  --bg-primary: #1d222d;
+  --bg-secondary: #242a36;
+  --bg-elevated: #2c3241;
+  --bg-surface: #343c4b;
+  --border-subtle: rgba(210, 218, 237, 0.10);
+  --border-medium: rgba(210, 218, 237, 0.19);
+  --accent: #c2b4e1;
+  --accent-2: #dfb3a1;
+  --accent-3: #a7c7b9;
+  --accent-soft: rgba(194, 180, 225, 0.12);
+  --accent-glow: rgba(194, 180, 225, 0.08);
   --gradient-accent: var(--accent);
-  --text-primary: #ffffff;
-  --text-secondary: #e2e6ee;
-  --text-muted: #c2c9d4;
+  --text-primary: #f0edf3;
+  --text-secondary: #c5c8d2;
+  --text-muted: #a0a8b9;
 }
 
 html, body {
@@ -28,7 +28,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   font-family: 'Source Sans 3', system-ui, sans-serif;
-  font-size: 18px;
+  font-size: 16px;
   background: var(--bg-primary);
 }
 
@@ -42,7 +42,7 @@ body::before {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: #17191f;
+  background: #1d222d;
 }
 
 #__next, body > div {
@@ -157,8 +157,8 @@ body::before {
 .editor-area .tiptap h2 { color: #c9bdff; }
 .editor-area .tiptap h3 { color: #aeeeff; }
 .editor-area .tiptap blockquote { color: #d1cce2; border-left-color: #b9a7ff; }
-.editor-area .tiptap strong, .editor-area .tiptap b { color: #ffffff; }
-.editor-area .tiptap hr { border-top-color: rgba(255, 255, 255, 0.14); }
+.editor-area .tiptap strong, .editor-area .tiptap b { color: #f0edf3; }
+.editor-area .tiptap hr { border-top-color: rgba(210, 218, 237, 0.10); }
 .editor-area .tiptap p.is-editor-empty:first-child::before { color: #aaa4c0; }
 
 /* Highlight for diff changes in editor */
@@ -224,8 +224,8 @@ body::before {
   font-family: 'Lora', Georgia, 'Times New Roman', serif;
   line-height: 1.85;
   letter-spacing: 0.01em;
-  background: #1e1e26;
-  color: #e8e5f0;
+  background: #222733;
+  color: #dedde5;
 }
 
 /* Ensure EditorContent and .tiptap fill the editor-area container */
@@ -253,8 +253,7 @@ body::before {
 }
 
 .critique-area-bg {
-  background: url('/board.png') repeat;
-  background-size: auto;
+  background: linear-gradient(155deg, #a7c7b908, transparent 60%), var(--bg-primary);
   min-height: 100%;
 }
 
@@ -340,21 +339,21 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  min-width: 8rem;
+  min-width: 0;
   justify-content: center;
-  padding: 0.75rem 1.75rem;
-  font-size: 1.15rem;
+  padding: 0.65rem 1rem;
+  font-size: 0.9rem;
   font-weight: 700;
   line-height: 1;
   border-radius: 0.6rem;
-  border: 2px solid var(--border-medium);
+  border: 1px solid var(--border-medium);
   background: var(--bg-surface);
   color: var(--text-secondary);
   cursor: pointer;
   transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .workshop-tab:hover:not(:disabled):not(.workshop-tab-active) {
-  color: #ffffff;
+  color: #f0edf3;
   border-color: var(--accent);
   background: var(--bg-elevated);
 }
@@ -370,7 +369,7 @@ body::before {
   background: var(--accent);
   border-color: var(--accent);
   color: #172027;
-  box-shadow: 0 6px 22px -8px var(--accent);
+  box-shadow: 0 3px 12px #0002;
 }
 .workshop-tab-active .workshop-tab-badge {
   background: #172027;
@@ -443,3 +442,9 @@ body.resizing-v, body.resizing-v * {
   user-select: none !important;
 }
 
+
+button:not(:disabled), select { cursor: pointer; }
+input, textarea { min-width: 0; }
+button:disabled { cursor: not-allowed; }
+:where(a, button, select, input, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+::selection { background: #c2b4e140; color: #f0edf3; }

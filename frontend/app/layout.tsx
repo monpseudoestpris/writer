@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Writer',
-  description: 'AI-powered writing critiques from famous personalities',
+  description: 'Votre atelier d’écriture : créez vos histoires, explorez vos idées et faites grandir votre plume.',
 };
 
 export default function RootLayout({
@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="fr">
       <body>{children}</body>
     </html>
   );

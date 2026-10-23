@@ -2,8 +2,6 @@ fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
-mistralai
-anthropic
 openai
 python-multipart
 python-docx

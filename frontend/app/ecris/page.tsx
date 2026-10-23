@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { WorkspaceNav, Icon } from '../components/Design';
 
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import {
@@ -1455,17 +1455,12 @@ export default function Home() {
   };
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
+    <div className="workspace-shell h-dvh flex overflow-hidden bg-[var(--bg-primary)]">
       {/* Sidebar */}
       <div style={{ width: showSidebar ? '17rem' : '0px', transition: 'width 200ms ease' }} className="flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden">
         <div className="w-[17rem] h-full flex flex-col">
           {/* Logo */}
-          <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-            <h1 className="font-display gradient-text font-bold text-lg tracking-tight">✍️ J&apos;écris</h1>
-            <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
-              ← Accueil
-            </Link>
-          </div>
+          <WorkspaceNav active="write" />
 
           {/* Books Header */}
           <div className="px-4 pt-4 pb-3">
@@ -1686,7 +1681,7 @@ export default function Home() {
           )
         }}>
           {/* Toolbar */}
-          <div className="flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
+          <div className="editor-topbar flex-shrink-0 px-5 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-4">
             <span className="text-[var(--text-primary)] text-base font-semibold tracking-tight">
               {selectedChapter ? selectedChapter.title : 'Éditeur'}
             </span>
@@ -1759,10 +1754,10 @@ export default function Home() {
               editorRef={editorRef}
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <p className="text-[var(--text-muted)] text-xl font-light mb-1">Aucun chapitre sélectionné</p>
-                <p className="text-[var(--text-muted)]/60 text-base">Créez un ouvrage et un chapitre pour commencer</p>
+            <div className="workspace-empty flex-1 flex items-center justify-center">
+              <div><span className="empty-icon"><Icon name="pen" /></span>
+                <h2>Une histoire à imaginer.</h2>
+                <p>Créez un ouvrage, ajoutez votre premier chapitre et laissez les mots venir.</p>
               </div>
             </div>
           )}
@@ -1818,7 +1813,7 @@ export default function Home() {
           )}
 
           {/* Bottom Bar */}
-          <div className="flex-shrink-0 px-5 py-3 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center gap-3">
+          <div className="editor-actions flex-shrink-0 px-5 py-3 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center gap-3">
             <select
               className="input-writer px-3 py-2 rounded-lg text-[var(--text-secondary)] text-base"
               value={selectedReviewer}
@@ -1941,14 +1936,14 @@ export default function Home() {
                 : { height: '6px', width: '100%', cursor: 'row-resize' }
               ),
               flexShrink: 0,
-              backgroundColor: isDragging ? '#c9a55a' : '#333',
+              backgroundColor: isDragging ? 'var(--accent)' : 'var(--border-subtle)',
               position: 'relative',
               zIndex: 10,
               transition: 'background-color 0.15s',
             }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-            onMouseEnter={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = '#c9a55a'; }}
-            onMouseLeave={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = '#333'; }}
+            onMouseEnter={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent)'; }}
+            onMouseLeave={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--border-subtle)'; }}
           />
         )}
 

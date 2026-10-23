@@ -1,11 +1,7 @@
-import os
 import logging
 from typing import AsyncGenerator
 
-try:
-    from mistralai import Mistral
-except ImportError:  # pragma: no cover - compatibility for older SDK versions
-    from mistralai.client import Mistral
+from backend.openrouter_utils import complete_text, stream_text, generation_kwargs
 
 from backend.ai_models import MISTRAL_BEST_MODEL
 from backend.prompts import with_human_style
@@ -14,28 +10,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_mistral_generation_kwargs() -> dict:
-    return {
-        "temperature": 0.8,
-        "top_p": 0.9,
-        "frequency_penalty": 0.3,
-        "presence_penalty": 0.2,
-    }
+    return generation_kwargs(MISTRAL_BEST_MODEL)
 
 
 def _log_mistral_response(model: str, response: str) -> None:
-    logger.info("[AI] response_received provider=mistral model=%s chars=%d preview=%r", model, len(response), response[:500])
+    logger.info("[AI] response_received provider=openrouter model=%s chars=%d preview=%r", model, len(response), response[:500])
 
-
-def get_mistral_client():
-    api_key = os.getenv("MISTRAL_API_KEY")
-    if not api_key:
-        raise ValueError("MISTRAL_API_KEY not found in environment variables.")
-    return Mistral(api_key=api_key)
 
 async def summarize_single_critique(critique: str) -> str:
     """Generate a short summary of a single critique with Mistral's best model."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_single_critique", MISTRAL_BEST_MODEL)
-    client = get_mistral_client()
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_single_critique", MISTRAL_BEST_MODEL)
     
     messages = [
         {
@@ -49,21 +33,18 @@ async def summarize_single_critique(critique: str) -> str:
         {"role": "user", "content": critique}
     ]
     
-    response = await client.chat.complete_async(
+    result = await complete_text(
         model=MISTRAL_BEST_MODEL,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     )
     
-    result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
     return result
 
 
 async def summarize_text(text: str) -> str:
     """Generate a factual 5-10 line summary with Mistral's best model."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_text", MISTRAL_BEST_MODEL)
-    client = get_mistral_client()
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_text", MISTRAL_BEST_MODEL)
     
     messages = [
         {
@@ -79,21 +60,18 @@ async def summarize_text(text: str) -> str:
         {"role": "user", "content": text}
     ]
     
-    response = await client.chat.complete_async(
+    result = await complete_text(
         model=MISTRAL_BEST_MODEL,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     )
     
-    result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
     return result
 
 
 async def summarize_critiques(critiques: list[dict]) -> str:
     """Summarize previous critiques into a concise digest with Mistral's best model."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_critiques", MISTRAL_BEST_MODEL)
-    client = get_mistral_client()
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_critiques", MISTRAL_BEST_MODEL)
     
     critiques_text = "\n\n".join(
         f"Critique de {c.get('reviewer', 'inconnu')} :\n{c.get('critique', '')}"
@@ -113,21 +91,18 @@ async def summarize_critiques(critiques: list[dict]) -> str:
         {"role": "user", "content": critiques_text}
     ]
     
-    response = await client.chat.complete_async(
+    result = await complete_text(
         model=MISTRAL_BEST_MODEL,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     )
     
-    result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
     return result
 
 
 async def stream_critique_from_mistral(text: str, prompt: str, model: str = MISTRAL_BEST_MODEL) -> AsyncGenerator[str, None]:
-    logger.info("[AI] request_started provider=mistral model=%s", model)
+    logger.info("[AI] request_started provider=openrouter model=%s", model)
     response_parts: list[str] = []
-    client = get_mistral_client()
     user_content = (
         "[DÉBUT DU TEXTE À CRITIQUER]\n"
         f"{text}\n"
@@ -140,44 +115,36 @@ async def stream_critique_from_mistral(text: str, prompt: str, model: str = MIST
         {"role": "user", "content": user_content}
     ]
     
-    async for chunk in await client.chat.stream_async(
+    async for delta in stream_text(
         model=model,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     ):
-        if chunk.data.choices[0].delta.content:
-            delta = chunk.data.choices[0].delta.content
-            response_parts.append(delta)
-            yield delta
-    logger.info("[AI] response_received provider=mistral model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
+        response_parts.append(delta)
+        yield delta
+    logger.info("[AI] response_received provider=openrouter model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
 
 
 async def stream_from_mistral_small(system_prompt: str, user_content: str) -> AsyncGenerator[str, None]:
     """Stream an auto-fill response with Mistral's best model."""
-    logger.info("[AI] request_started provider=mistral model=%s", MISTRAL_BEST_MODEL)
+    logger.info("[AI] request_started provider=openrouter model=%s", MISTRAL_BEST_MODEL)
     response_parts: list[str] = []
-    client = get_mistral_client()
     messages = [
         {"role": "system", "content": with_human_style(system_prompt)},
         {"role": "user", "content": user_content}
     ]
     
-    async for chunk in await client.chat.stream_async(
+    async for delta in stream_text(
         model=MISTRAL_BEST_MODEL,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     ):
-        if chunk.data.choices[0].delta.content:
-            delta = chunk.data.choices[0].delta.content
-            response_parts.append(delta)
-            yield delta
+        response_parts.append(delta)
+        yield delta
     _log_mistral_response(MISTRAL_BEST_MODEL, ''.join(response_parts))
 
 
 async def summarize_chat_messages(messages: list[dict]) -> str:
     """Summarize a batch of chat messages with Mistral's best model."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=summarize_chat_messages", MISTRAL_BEST_MODEL)
-    client = get_mistral_client()
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_chat_messages", MISTRAL_BEST_MODEL)
     formatted = "\n".join(
         f"{'Auteur' if m['role']=='user' else 'Critique'}: {m['content']}"
         for m in messages
@@ -191,15 +158,13 @@ async def summarize_chat_messages(messages: list[dict]) -> str:
         "- Les demandes spécifiques de l'auteur\n"
         "Sois concis mais exhaustif. Réponds en français, 150-250 mots maximum."
     )
-    response = await client.chat.complete_async(
+    result = await complete_text(
         model=MISTRAL_BEST_MODEL,
         messages=[
             {"role": "system", "content": with_human_style(prompt)},
             {"role": "user", "content": formatted}
         ],
-        **get_mistral_generation_kwargs(),
     )
-    result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
     return result
 
@@ -208,28 +173,23 @@ async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, 
     """Stream a multi-turn chat response with Mistral's best model.
     
     Messages should include system prompt and full conversation history.
-    Mistral automatically applies prefix caching on the shared prefix.
+    Requests are sent through OpenRouter with the full conversation history.
     """
-    logger.info("[AI] request_started provider=mistral model=%s", MISTRAL_BEST_MODEL)
+    logger.info("[AI] request_started provider=openrouter model=%s", MISTRAL_BEST_MODEL)
     response_parts: list[str] = []
-    client = get_mistral_client()
     
-    async for chunk in await client.chat.stream_async(
+    async for delta in stream_text(
         model=MISTRAL_BEST_MODEL,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     ):
-        if chunk.data.choices[0].delta.content:
-            delta = chunk.data.choices[0].delta.content
-            response_parts.append(delta)
-            yield delta
+        response_parts.append(delta)
+        yield delta
     _log_mistral_response(MISTRAL_BEST_MODEL, ''.join(response_parts))
 
 
 async def get_structured_comments(text: str, system_prompt: str) -> str:
     """Appel au meilleur modèle Mistral pour obtenir des commentaires JSON structurés."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=get_structured_comments", MISTRAL_BEST_MODEL)
-    client = get_mistral_client()
+    logger.info("[AI] request_started provider=openrouter model=%s operation=get_structured_comments", MISTRAL_BEST_MODEL)
     user_content = (
         "[DÉBUT DU DOCUMENT]\n"
         f"{text}\n"
@@ -240,29 +200,24 @@ async def get_structured_comments(text: str, system_prompt: str) -> str:
         {"role": "system", "content": with_human_style(system_prompt)},
         {"role": "user", "content": user_content}
     ]
-    response = await client.chat.complete_async(
+    result = await complete_text(
         model=MISTRAL_BEST_MODEL,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     )
-    result = response.choices[0].message.content
     _log_mistral_response(MISTRAL_BEST_MODEL, result)
     return result
 
 
 async def generate_text_from_mistral(system_prompt: str, user_content: str, model: str = MISTRAL_BEST_MODEL) -> str:
     """Appel non-streaming au meilleur modèle Mistral, pour générer un contenu texte libre."""
-    logger.info("[AI] request_started provider=mistral model=%s operation=generate_text", model)
-    client = get_mistral_client()
+    logger.info("[AI] request_started provider=openrouter model=%s operation=generate_text", model)
     messages = [
         {"role": "system", "content": with_human_style(system_prompt)},
         {"role": "user", "content": user_content}
     ]
-    response = await client.chat.complete_async(
+    result = await complete_text(
         model=model,
         messages=messages,
-        **get_mistral_generation_kwargs(),
     )
-    result = response.choices[0].message.content
     _log_mistral_response(model, result)
     return result

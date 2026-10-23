@@ -1,93 +1,74 @@
-'use client';
-
 import Link from 'next/link';
+import { Brand, Icon } from './components/Design';
 
 const CHOICES = [
-  {
-    href: '/ecris',
-    icon: '✍️',
-    title: "J'écris",
-    description:
-      "Rédigez vos livres et chapitres, construisez votre univers, et recevez les critiques de vos auteurs préférés.",
-    gradient: 'from-fuchsia-500/25 via-violet-500/15 to-transparent',
-    ring: 'group-hover:shadow-[0_25px_60px_-15px_rgba(236,72,153,0.35)]',
-  },
-  {
-    href: '/apprends',
-    icon: '🎓',
-    title: "J'apprends",
-    description:
-      "Rejoignez un atelier d'écriture créative : exercices du professeur, avis de vos camarades de classe, et critique finale.",
-    gradient: 'from-cyan-500/25 via-violet-500/15 to-transparent',
-    ring: 'group-hover:shadow-[0_25px_60px_-15px_rgba(34,211,238,0.35)]',
-  },
+  { href: '/ecris', icon: 'pen' as const, theme: 'lilac', number: '01', title: "J’écris", subtitle: 'Donnez vie à vos idées', description: 'Un espace à vous pour vos ouvrages, vos chapitres et les univers que vous imaginez.', features: ['Éditeur de texte', 'Création d’univers', 'Regards d’auteurs'], action: 'Ouvrir mon espace' },
+  { href: '/apprends', icon: 'book' as const, theme: 'sage', number: '02', title: "J’apprends", subtitle: 'Faites grandir votre plume', description: 'Des exercices créatifs, des conseils et des échanges pour trouver votre propre voix.', features: ['Exercices guidés', 'Cours personnalisés', 'Retours constructifs'], action: 'Rejoindre l’atelier' },
 ];
 
 export default function Home() {
   return (
-    <div className="relative h-screen flex flex-col items-center justify-center overflow-hidden bg-[var(--bg-primary)] px-6">
-      {/* Animated ambient blobs */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div
-          className="absolute -top-40 left-1/4 h-[30rem] w-[30rem] rounded-full bg-[var(--accent)]/25 blur-[100px]"
-          style={{ animation: 'floatBlob 14s ease-in-out infinite' }}
-        />
-        <div
-          className="absolute top-1/3 -right-32 h-[26rem] w-[26rem] rounded-full bg-[var(--accent-2)]/20 blur-[100px]"
-          style={{ animation: 'floatBlob 18s ease-in-out infinite reverse' }}
-        />
-        <div
-          className="absolute bottom-[-8rem] left-1/3 h-[24rem] w-[24rem] rounded-full bg-[var(--accent-3)]/15 blur-[100px]"
-          style={{ animation: 'floatBlob 16s ease-in-out infinite' }}
-        />
-      </div>
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.025] mix-blend-overlay"
-        style={{ backgroundImage: 'url(/paper.png)', backgroundSize: 'auto' }}
-      />
+    <div className="home-page">
+      <a className="skip-link" href="#espaces">Choisir mon espace</a>
+      <header className="home-header">
+        <Brand />
+        <nav className="home-nav" aria-label="Navigation principale">
+          <Link href="/ecris">J&apos;écris</Link>
+          <Link href="/apprends">J&apos;apprends</Link>
+        </nav>
+        <span className="ai-badge"><Icon name="sparkles" /> Un peu d’IA, beaucoup de vous</span>
+      </header>
 
-      <div className="relative z-10 flex flex-col items-center critique-content">
-        <div className="text-center mb-12">
-          <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--border-medium)] bg-white/[0.04] text-xs font-semibold tracking-[0.25em] uppercase text-[var(--text-secondary)] mb-6">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-3)] animate-pulse" />
-            Propulsé par l&apos;IA
-          </span>
-          <h1 className="font-display font-bold text-7xl sm:text-8xl gradient-text tracking-tight mb-4 leading-tight">
-            Writer
-          </h1>
-          <p className="text-[var(--text-secondary)] text-xl sm:text-2xl font-medium">
-            Que voulez-vous faire aujourd&apos;hui&nbsp;?
-          </p>
-        </div>
+      <main className="home-main">
+        <section className="home-hero" aria-labelledby="home-title">
+          <div className="hero-copy">
+            <span className="eyebrow"><span /> VOTRE ATELIER D’ÉCRITURE</span>
+            <h1 id="home-title">Les belles histoires<br />commencent <em>ici.</em></h1>
+            <p>Une idée, une envie, quelques mots…<br />Offrez à votre imagination l’espace de s’exprimer.</p>
+            <div className="hero-actions">
+              <Link href="/ecris" className="home-primary">À vos plumes <Icon name="arrow" /></Link>
+              <Link href="/apprends" className="home-secondary">Explorer l’atelier <span aria-hidden="true">↗</span></Link>
+            </div>
+            <div className="hero-footnote"><Icon name="leaf" /> À votre rythme. À votre façon.</div>
+          </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-3xl">
-          {CHOICES.map((c) => (
-            <Link
-              key={c.href}
-              href={c.href}
-              className={`group relative flex flex-col items-center text-center gap-4 p-9 rounded-3xl border border-[var(--border-subtle)] bg-gradient-to-br ${c.gradient} bg-[var(--bg-secondary)]/70 backdrop-blur-sm hover:border-[var(--accent)]/50 hover:-translate-y-1.5 transition-all duration-300 ${c.ring} overflow-hidden`}
-            >
-              <span className="absolute inset-0 rounded-3xl bg-gradient-to-br from-white/[0.06] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <span className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-white/[0.06] text-3xl border border-white/10 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
-                {c.icon}
-              </span>
-              <h2 className="relative font-display font-bold text-3xl text-[var(--text-primary)] group-hover:gradient-text transition-colors">
-                {c.title}
-              </h2>
-              <p className="relative text-base text-[var(--text-secondary)] leading-relaxed">
-                {c.description}
-              </p>
-              <span className="relative mt-1 inline-flex items-center gap-1.5 text-[var(--accent-3)] text-xs font-bold tracking-wide opacity-0 group-hover:opacity-100 transition-all group-hover:gap-2.5">
-                Entrer <span aria-hidden>→</span>
-              </span>
-            </Link>
-          ))}
-        </div>
+          <div className="writing-scene" aria-hidden="true">
+            <div className="scene-orbit orbit-one" /><div className="scene-orbit orbit-two" />
+            <span className="scene-star star-one">✧</span><span className="scene-star star-two">✦</span>
+            <div className="notebook-back" />
+            <div className="notebook">
+              <div className="notebook-top"><span>LES IDÉES PRENNENT VIE</span><Icon name="sparkles" /></div>
+              <div className="notebook-content">
+                <span className="notebook-chapter">CHAPITRE PREMIER</span>
+                <p>Tout commence<br />par <em>un mot.</em></p>
+                <div className="ink-lines"><i /><i /><i /></div>
+                <svg className="ink-flourish" width="160" height="40" viewBox="0 0 160 40" fill="none"><path d="M4 25C35 2 52 8 42 23c-9 14-20 5-6 0 22-8 27 14 47 1 8-6 10-4 9 2 14-8 25-4 37-8 10-3 15-6 25-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+              </div>
+              <div className="notebook-bottom"><span>VOTRE PROCHAINE HISTOIRE</span><span>01</span></div>
+              <div className="page-bookmark" />
+            </div>
+            <div className="scene-note"><span className="scene-note-icon"><Icon name="pen" /></span><div>Un mot après l’autre.<small>Et l’imagination fait le reste.</small></div></div>
+            <div className="scene-label">Laissez une place à l’inspiration <span>↗</span></div>
+          </div>
+        </section>
 
-        <p className="mt-12 text-[var(--text-muted)] text-sm tracking-wide">
-          Pensé pour les auteurs, les curieux et les élèves qui veulent progresser.
-        </p>
-      </div>
+        <section className="spaces-section" id="espaces" aria-labelledby="spaces-title">
+          <div className="spaces-heading"><h2 id="spaces-title">Aujourd’hui, je prends le temps de…</h2><span>DEUX ESPACES, MILLE POSSIBILITÉS</span></div>
+          <div className="spaces-grid">
+            {CHOICES.map(choice => (
+              <Link key={choice.href} href={choice.href} className={`space-card ${choice.theme}`}>
+                <div className="space-card-top"><span className="space-icon"><Icon name={choice.icon} /></span><span className="space-number">{choice.number} / EXPLORER</span><Icon name="arrow" className="space-arrow" /></div>
+                <div className="space-title"><h3>{choice.title}</h3><span>{choice.subtitle}</span></div>
+                <p>{choice.description}</p>
+                <div className="space-features">{choice.features.map(feature => <span key={feature}>{feature}</span>)}</div>
+                <div className="space-card-footer">{choice.action}<span aria-hidden="true">↗</span></div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      </main>
+
+      <footer className="home-footer"><span>Un espace pour créer. Une envie de progresser.</span><span>Fait pour les amoureux des mots <span className="footer-flower" aria-hidden="true">✳</span></span></footer>
     </div>
   );
 }

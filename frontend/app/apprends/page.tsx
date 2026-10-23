@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, ReactNode } from 'react';
-import Link from 'next/link';
+import { WorkspaceNav, Icon } from '../components/Design';
 import {
   ClassroomExercise,
   getClassroomExercises,
@@ -509,15 +509,10 @@ export default function ApprendsPage() {
   }, [isSidebarDragging]);
 
   return (
-    <div ref={layoutRef} className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
+    <div ref={layoutRef} className="workspace-shell h-dvh flex overflow-hidden bg-[var(--bg-primary)]">
       {/* Sidebar */}
       <div className="flex-shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col overflow-hidden" style={{ width: `${sidebarWidth}px` }}>
-        <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-          <h1 className="font-display gradient-text font-bold text-lg tracking-tight">🎓 J&apos;apprends</h1>
-          <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--accent-3)] text-xs transition-colors" title="Retour à l'accueil">
-            ← Accueil
-          </Link>
-        </div>
+        <WorkspaceNav active="learn" />
 
         <div className="px-4 pt-4 pb-3">
           <label className="block mb-3">
@@ -677,9 +672,10 @@ export default function ApprendsPage() {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="workspace-empty flex-1 flex items-center justify-center">
             <div className="text-center max-w-md">
-              <p className="text-4xl mb-4">🎓</p>
+              <span className="empty-icon"><Icon name="book" /></span>
+              <h2>Votre plume se cultive.</h2>
               <p className="text-[var(--text-secondary)]">
                 Bienvenue dans l&apos;atelier de {teacherName}. Créez un nouvel exercice pour commencer.
               </p>
