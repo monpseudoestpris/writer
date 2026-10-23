@@ -62,17 +62,17 @@ def test_all_model_families_stream_through_openrouter(requests, function, model)
         assert not {"temperature", "top_p", "frequency_penalty", "presence_penalty"} & requests[0].keys()
 
 
-@pytest.mark.parametrize("function,args", [
-    (mistral_utils.summarize_single_critique, ("Critique",)),
-    (mistral_utils.summarize_text, ("Texte",)),
-    (mistral_utils.summarize_critiques, ([{"reviewer": "A", "critique": "Avis"}],)),
-    (mistral_utils.summarize_chat_messages, ([{"role": "user", "content": "Texte"}],)),
-    (mistral_utils.get_structured_comments, ("Document", "Renvoyer du JSON")),
-    (mistral_utils.generate_text_from_mistral, ("Consigne", "Texte", models.MISTRAL_FAST_MODEL)),
+@pytest.mark.parametrize("function,args,expected_model", [
+    (mistral_utils.summarize_single_critique, ("Critique",), models.OPENAI_FAST_MODEL),
+    (mistral_utils.summarize_text, ("Texte",), models.OPENAI_FAST_MODEL),
+    (mistral_utils.summarize_critiques, ([{"reviewer": "A", "critique": "Avis"}],), models.OPENAI_FAST_MODEL),
+    (mistral_utils.summarize_chat_messages, ([{"role": "user", "content": "Texte"}],), models.OPENAI_FAST_MODEL),
+    (mistral_utils.get_structured_comments, ("Document", "Renvoyer du JSON"), models.ANTHROPIC_MEDIUM_MODEL),
+    (mistral_utils.generate_text_from_mistral, ("Consigne", "Texte"), models.OPENAI_FAST_MODEL),
 ])
-def test_nonstreaming_features_use_openrouter(requests, function, args):
+def test_nonstreaming_features_use_openrouter(requests, function, args, expected_model):
     assert asyncio.run(function(*args)) == "Bonjour !"
-    assert requests[0]["model"].startswith("mistralai/")
+    assert requests[0]["model"] == models.OPENROUTER_MODEL_IDS[expected_model]
     assert not requests[0].get("stream")
 
 
@@ -80,11 +80,11 @@ def test_nonstreaming_features_use_openrouter(requests, function, args):
     (mistral_utils.stream_from_mistral_small, ("Consigne", "Texte")),
     (mistral_utils.stream_chat_from_mistral, ([{"role": "user", "content": "Texte"}],)),
 ])
-def test_mistral_chat_and_autofill_stream(requests, function, args):
+def test_writing_chat_and_autofill_stream(requests, function, args):
     async def collect():
         return ''.join([part async for part in function(*args)])
     assert asyncio.run(collect()) == "Bonjour !"
-    assert requests[0]["model"] == models.OPENROUTER_MODEL_IDS[models.MISTRAL_BEST_MODEL]
+    assert requests[0]["model"] == models.OPENROUTER_MODEL_IDS[models.OPENAI_FAST_MODEL]
 
 
 @pytest.mark.parametrize("key", ["", "   "])
@@ -100,6 +100,7 @@ def test_unknown_native_model_fails_explicitly():
     with pytest.raises(ValueError, match="OpenRouter"):
         router.resolve_model("unknown-model")
     assert router.resolve_model("vendor/model") == "vendor/model"
+    assert router.resolve_model(models.OPENAI_FAST_MODEL) == "openai/gpt-6-luna"
 
 
 @pytest.mark.parametrize("status,payload,expected", [
@@ -129,3 +130,42 @@ def test_stream_error_is_propagated(monkeypatch):
         return [part async for part in router.stream_text([], models.MISTRAL_BEST_MODEL)]
     with pytest.raises((RuntimeError, __import__('openai').APIError)):
         asyncio.run(collect())
+
+
+def test_reasoning_is_filtered_from_complete_and_streamed_answers():
+    complete = router._VisibleTextFilter()
+    assert complete.push("Avant <think>secret</think> après") + complete.finish() == "Avant  après"
+
+    streamed = router._VisibleTextFilter()
+    parts = [streamed.push(part) for part in ("Avant <thi", "nk>secret</th", "ink> après")]
+    assert "".join(parts) + streamed.finish() == "Avant  après"
+
+
+def test_writing_tasks_use_luna_and_sonnet(monkeypatch):
+    called = []
+
+    async def fake_complete(*, model, messages):
+        called.append(model)
+        return "Réponse"
+
+    async def fake_stream(*, model, messages):
+        called.append(model)
+        yield "Réponse"
+
+    monkeypatch.setattr(mistral_utils, "complete_text", fake_complete)
+    monkeypatch.setattr(mistral_utils, "stream_text", fake_stream)
+
+    asyncio.run(mistral_utils.summarize_text("Texte"))
+    asyncio.run(mistral_utils.generate_writing_text("Consigne", "Texte"))
+    asyncio.run(mistral_utils.get_structured_comments("Texte", "Consigne"))
+
+    async def collect():
+        return "".join([part async for part in mistral_utils.stream_writing_critique("Texte", "Consigne")])
+
+    assert asyncio.run(collect()) == "Réponse"
+    assert called == [
+        models.OPENAI_FAST_MODEL,
+        models.OPENAI_FAST_MODEL,
+        models.ANTHROPIC_MEDIUM_MODEL,
+        models.OPENAI_FAST_MODEL,
+    ]

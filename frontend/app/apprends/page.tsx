@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, ReactNode } from 'react';
+import { useState, useEffect, useRef, useSyncExternalStore, ReactNode } from 'react';
 import { WorkspaceNav, Icon } from '../components/Design';
 import {
   ClassroomExercise,
@@ -17,6 +17,7 @@ import {
 } from '../lib/db';
 import RichEditor, { EditorToolbar } from '../components/RichEditor';
 import type { Editor } from '@tiptap/react';
+import { getLessonJobs, getServerLessonJobs, startLessonJob, subscribeLessonJobs } from '../lib/classroomLessonJobs';
 
 const API_URL = 'http://localhost:8000';
 
@@ -174,9 +175,15 @@ export default function ApprendsPage() {
   const [exerciseProposals, setExerciseProposals] = useState<string[]>([]);
   const [openLessonIndex, setOpenLessonIndex] = useState<number | null>(null);
   const [lessonTexts, setLessonTexts] = useState<Record<number, string>>({});
-  const [loadingLessonIndex, setLoadingLessonIndex] = useState<number | null>(null);
+  const chosenProposalIds = useRef(new Map<string, string>());
+  const completedProposalLessons = useRef(new Map<string, string>());
+  const [activeProposalLessons, setActiveProposalLessons] = useState<Set<string>>(new Set());
+  const [loadingLessonIndexes, setLoadingLessonIndexes] = useState<Set<number>>(new Set());
   const [showLesson, setShowLesson] = useState(false);
-  const [isLoadingSelectedLesson, setIsLoadingSelectedLesson] = useState(false);
+  const lessonJobs = useSyncExternalStore(subscribeLessonJobs, getLessonJobs, getServerLessonJobs);
+  const selectedLessonJob = selected ? lessonJobs.get(selected.id) : undefined;
+  const isLoadingSelectedLesson = selectedLessonJob?.status === 'running' ||
+    (!!selected && activeProposalLessons.has(selected.promptMarkdown));
   const [isWritingFullscreen, setIsWritingFullscreen] = useState(false);
   const [exerciseAuthors, setExerciseAuthors] = useState<{ id: string; name: string }[]>([]);
   const [isLoadingAuthorJudgment, setIsLoadingAuthorJudgment] = useState(false);
@@ -188,6 +195,17 @@ export default function ApprendsPage() {
   const [sidebarWidth, setSidebarWidth] = useState(272);
   const [isSidebarDragging, setIsSidebarDragging] = useState(false);
   const layoutRef = useRef<HTMLDivElement>(null);
+
+  const selectExercise = (ex: ClassroomExercise, resumeView = false) => {
+    setSelected(ex);
+    setContent(ex.content || '');
+    setError(null);
+    setShowLesson(resumeView && sessionStorage.getItem('writer-classroom-view') === 'course');
+    if (!resumeView) sessionStorage.setItem('writer-classroom-view', 'exercise');
+    setFeedbackTab('latest');
+    setExpandedCommentVersions(new Set());
+    saveLastClassroomExerciseId(ex.id).catch(() => {});
+  };
 
   useEffect(() => {
     (async () => {
@@ -201,7 +219,7 @@ export default function ApprendsPage() {
         // Resume the exercise the student was last working on, not just the newest one
         const lastId = await getLastClassroomExerciseId();
         const toResume = (lastId && list.find(e => e.id === lastId)) || list[0];
-        selectExercise(toResume);
+        selectExercise(toResume, true);
       }
     })();
 
@@ -213,16 +231,6 @@ export default function ApprendsPage() {
       })
       .catch(() => {});
   }, []);
-
-  const selectExercise = (ex: ClassroomExercise) => {
-    setSelected(ex);
-    setContent(ex.content || '');
-    setError(null);
-    setShowLesson(false);
-    setFeedbackTab('latest');
-    setExpandedCommentVersions(new Set());
-    saveLastClassroomExerciseId(ex.id).catch(() => {});
-  };
 
   // The teacher's progress record: synthesis of +/- from every exercise finished so far
   const getPastSyntheses = (excludeId?: string) =>
@@ -261,54 +269,73 @@ export default function ApprendsPage() {
   const chooseExerciseProposal = async (markdown: string, author?: { id: string; name: string }) => {
     const title = extractTitle(markdown);
     const created = await createClassroomExercise(title, markdown, author?.id || '', author?.name || '');
+    chosenProposalIds.current.set(markdown, created.id);
+    const lesson = completedProposalLessons.current.get(markdown);
+    if (lesson) {
+      await updateClassroomExercise(created.id, { lesson });
+      created.lesson = lesson;
+    }
     setExercises(prev => [created, ...prev]);
     selectExercise(created);
     setExerciseProposals([]);
   };
 
   const fetchLesson = async (index: number, proposal: string) => {
-    if (lessonTexts[index]) {
+    if (loadingLessonIndexes.has(index)) {
+      setOpenLessonIndex(prev => prev === index ? null : index);
+      return;
+    }
+    if (lessonTexts[index] && !lessonTexts[index].startsWith('⚠️')) {
       setOpenLessonIndex(prev => prev === index ? null : index);
       return;
     }
     setOpenLessonIndex(index);
-    setLoadingLessonIndex(index);
+    setLessonTexts(prev => ({ ...prev, [index]: '' }));
+    setActiveProposalLessons(prev => new Set(prev).add(proposal));
+    setLoadingLessonIndexes(prev => new Set(prev).add(index));
     try {
-      await streamInto(
+      const full = await streamInto(
         `${API_URL}/classroom/lesson`,
         { exercise_prompt: proposal, experience_level: experienceLevel },
         (text) => setLessonTexts(prev => ({ ...prev, [index]: text }))
       );
+      completedProposalLessons.current.set(proposal, full);
+      const exerciseId = chosenProposalIds.current.get(proposal);
+      if (exerciseId) {
+        await updateClassroomExercise(exerciseId, { lesson: full });
+        setExercises(prev => prev.map(ex => ex.id === exerciseId ? { ...ex, lesson: full } : ex));
+        setSelected(prev => prev?.id === exerciseId ? { ...prev, lesson: full } : prev);
+      }
     } catch (e: unknown) {
-      setLessonTexts(prev => ({ ...prev, [index]: e instanceof Error ? `⚠️ ${e.message}` : '⚠️ Impossible de générer le cours.' }));
+      const message = e instanceof Error ? e.message : 'Impossible de générer le cours.';
+      setLessonTexts(prev => ({ ...prev, [index]: `⚠️ ${message}` }));
     } finally {
-      setLoadingLessonIndex(null);
+      setActiveProposalLessons(prev => {
+        const next = new Set(prev);
+        next.delete(proposal);
+        return next;
+      });
+      setLoadingLessonIndexes(prev => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      });
     }
   };
 
-  const fetchSelectedLesson = async () => {
+  const fetchSelectedLesson = () => {
     if (!selected) return;
-    if (selected.lesson) {
-      setShowLesson(s => !s);
-      return;
-    }
     setShowLesson(true);
-    setIsLoadingSelectedLesson(true);
-    try {
-      const full = await streamInto(
-        `${API_URL}/classroom/lesson`,
-        { exercise_prompt: selected.promptMarkdown, experience_level: experienceLevel },
-        (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, lesson: text } : e))
-      );
-      await updateClassroomExercise(selected.id, { lesson: full });
-      setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, lesson: full } : e));
-      setSelected(prev => prev ? { ...prev, lesson: full } : prev);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Impossible de générer le cours.");
-      setShowLesson(false);
-    } finally {
-      setIsLoadingSelectedLesson(false);
-    }
+    sessionStorage.setItem('writer-classroom-view', 'course');
+    if (!selected.lesson && !isLoadingSelectedLesson) generateSelectedLesson();
+  };
+
+  const generateSelectedLesson = () => {
+    if (!selected || isLoadingSelectedLesson) return;
+    setShowLesson(true);
+    sessionStorage.setItem('writer-classroom-view', 'course');
+    setError(null);
+    startLessonJob(selected.id, selected.promptMarkdown, experienceLevel);
   };
 
   const fetchAuthorJudgment = async () => {
@@ -333,10 +360,10 @@ export default function ApprendsPage() {
       const historyEntry = await appendClassroomComment(selected.id, { source: 'author', content: full, textSnapshot: plainText });
       if (historyEntry) {
         setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, commentHistory: [...e.commentHistory, historyEntry] } : e));
-        setSelected(prev => prev ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
+        setSelected(prev => prev?.id === selected.id ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
       }
       setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: full } : e));
-      setSelected(prev => prev ? { ...prev, authorJudgment: full } : prev);
+      setSelected(prev => prev?.id === selected.id ? { ...prev, authorJudgment: full } : prev);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "L'auteur n'a pas pu juger le texte.");
     } finally {
@@ -367,23 +394,43 @@ export default function ApprendsPage() {
     body: object,
     onChunk: (fullText: string) => void
   ): Promise<string> => {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error(`Erreur ${response.status}`);
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    if (!reader) throw new Error('Pas de flux disponible');
-    let full = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      full += decoder.decode(value, { stream: true });
-      onChunk(full);
+    const controller = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => { timedOut = true; controller.abort(); }, 180_000);
+    };
+    try {
+      resetIdleTimer();
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Erreur ${response.status}`);
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('Pas de flux disponible');
+      let full = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        resetIdleTimer();
+        full += decoder.decode(value, { stream: true });
+        if (full.includes('[[WRITER_LESSON_ERROR]]')) throw new Error('Le cours n’a pas pu être généré. Réessayez.');
+        onChunk(full);
+      }
+      full += decoder.decode();
+      if (!full.trim()) throw new Error('La réponse générée est vide. Réessayez.');
+      return full;
+    } catch (error) {
+      if (timedOut) throw new Error('La génération ne répond plus. Vous pouvez réessayer.');
+      throw error;
+    } finally {
+      if (idleTimer) clearTimeout(idleTimer);
     }
-    return full;
   };
 
   const handlePeerReview = async () => {
@@ -403,10 +450,10 @@ export default function ApprendsPage() {
       const historyEntry = await appendClassroomComment(selected.id, { source: 'peers', content: full, textSnapshot: plainText });
       if (historyEntry) {
         setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, commentHistory: [...e.commentHistory, historyEntry] } : e));
-        setSelected(prev => prev ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
+        setSelected(prev => prev?.id === selected.id ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
       }
       setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : e));
-      setSelected(prev => prev ? { ...prev, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : prev);
+      setSelected(prev => prev?.id === selected.id ? { ...prev, peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' } : prev);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Les camarades n'ont pas pu commenter.");
     } finally {
@@ -456,10 +503,10 @@ export default function ApprendsPage() {
       const historyEntry = await appendClassroomComment(selected.id, { source: 'teacher', content: full, textSnapshot: plainText });
       if (historyEntry) {
         setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, commentHistory: [...e.commentHistory, historyEntry] } : e));
-        setSelected(prev => prev ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
+        setSelected(prev => prev?.id === selected.id ? { ...prev, commentHistory: [...prev.commentHistory, historyEntry] } : prev);
       }
       setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, teacherCritique: full, status, synthesis } : e));
-      setSelected(prev => prev ? { ...prev, teacherCritique: full, status, synthesis } : prev);
+      setSelected(prev => prev?.id === selected.id ? { ...prev, teacherCritique: full, status, synthesis } : prev);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Le professeur n'a pas pu répondre.");
     } finally {
@@ -685,7 +732,7 @@ export default function ApprendsPage() {
           <>
           <div className="flex-shrink-0 px-6 py-3 bg-[var(--bg-secondary)] border-b border-[var(--border-medium)] flex items-center gap-2" role="tablist" aria-label="Atelier">
             <button
-              onClick={() => setShowLesson(false)}
+              onClick={() => { setShowLesson(false); sessionStorage.setItem('writer-classroom-view', 'exercise'); }}
               className={`workshop-tab ${!showLesson ? 'workshop-tab-active' : ''}`}
               aria-selected={!showLesson}
               role="tab"
@@ -693,9 +740,8 @@ export default function ApprendsPage() {
               ✍️ Exos
             </button>
             <button
-              onClick={() => { if (!showLesson || !selected.lesson) fetchSelectedLesson(); }}
-              disabled={isLoadingSelectedLesson}
-              className={`workshop-tab workshop-tab-cours ${showLesson ? 'workshop-tab-active' : ''} ${isLoadingSelectedLesson ? 'opacity-60 cursor-wait' : ''}`}
+              onClick={fetchSelectedLesson}
+              className={`workshop-tab workshop-tab-cours ${showLesson ? 'workshop-tab-active' : ''}`}
               aria-selected={showLesson}
               role="tab"
             >
@@ -790,10 +836,26 @@ export default function ApprendsPage() {
                     </div>
                     {showLesson && (
                       <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]" role="tabpanel">
-                        {isLoadingSelectedLesson && !selected.lesson ? (
-                          <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {isLoadingSelectedLesson ? <span className="loading-cursor">Le prof prépare le cours…</span> : 'Votre cours'}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={generateSelectedLesson}
+                            disabled={isLoadingSelectedLesson}
+                            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {isLoadingSelectedLesson ? '⏳ Génération…' : '↻ Régénérer le cours'}
+                          </button>
+                        </div>
+                        {selectedLessonJob?.error && (
+                          <p role="alert" className="mb-2 text-sm text-red-400">{selectedLessonJob.error}</p>
+                        )}
+                        {isLoadingSelectedLesson && !selectedLessonJob?.text && !selected.lesson ? (
+                          <p className="text-xs text-[var(--text-muted)] loading-cursor">Le cours arrive…</p>
                         ) : (
-                          renderMarkdown(selected.lesson || '')
+                          renderMarkdown(selectedLessonJob?.text || selected.lesson || '')
                         )}
                       </div>
                     )}
@@ -1066,7 +1128,7 @@ export default function ApprendsPage() {
                     {renderMarkdown(proposal)}
                     {openLessonIndex === i && (
                       <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
-                        {loadingLessonIndex === i && !lessonTexts[i] ? (
+                        {loadingLessonIndexes.has(i) && !lessonTexts[i] ? (
                           <p className="text-xs text-[var(--text-muted)] loading-cursor">Le prof prépare le cours…</p>
                         ) : (
                           renderMarkdown(lessonTexts[i] || '')
@@ -1079,7 +1141,7 @@ export default function ApprendsPage() {
                       onClick={() => fetchLesson(i, proposal)}
                       className="px-3 py-2 rounded-md text-sm font-semibold border border-[var(--border-medium)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--accent-3)]/50 hover:text-[var(--accent-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-3)] transition-all"
                     >
-                      {loadingLessonIndex === i ? '⏳' : openLessonIndex === i ? '📚 Masquer' : '📚 Le cours'}
+                      {loadingLessonIndexes.has(i) ? '⏳' : openLessonIndex === i ? '📚 Masquer' : '📚 Le cours'}
                     </button>
                     <button
                       onClick={() => chooseExerciseProposal(proposal, exerciseAuthors[i])}

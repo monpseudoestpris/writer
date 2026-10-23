@@ -9,15 +9,14 @@ import random
 import logging
 import time
 from backend.models import ReviewRequest, SummarizeRequest, SummarizeTextRequest, DialogueRequest, ReadersReviewRequest, WorldBuildingFeedbackRequest, WorldBuildingAutoFillRequest, WBReadersReviewRequest, PanelReviewRequest, WBPanelReviewRequest, PanelAnalyzeRequest, WBPanelAnalyzeRequest, ChatRequest, ChatSummarizeRequest, RewriteRequest, SelectionAssistRequest, ClassroomExerciseRequest, ClassroomLessonRequest, ClassroomPeerReviewRequest, ClassroomTeacherRequest, ClassroomSynthesisRequest, ClassroomAuthorJudgmentRequest
-from backend.mistral_utils import stream_critique_from_mistral, summarize_critiques, summarize_single_critique, summarize_text, stream_from_mistral_small, stream_chat_from_mistral, summarize_chat_messages, get_structured_comments, generate_text_from_mistral
+from backend.mistral_utils import stream_writing_critique, summarize_critiques, summarize_single_critique, summarize_text, stream_writing_text, stream_writing_chat, summarize_chat_messages, get_structured_comments, generate_writing_text
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 from backend.students import STUDENTS, STUDENT_IDS, TEACHER_NAME, TEACHER_PROMPT, get_students_list
 from backend.auteurs import AUTHORS, get_author_for_genre
-from backend.ai_models import MISTRAL_BEST_MODEL, MISTRAL_MEDIUM_MODEL, MISTRAL_FAST_MODEL, ANTHROPIC_BEST_MODEL, ANTHROPIC_MEDIUM_MODEL, OPENAI_BEST_MODEL, OPENAI_MEDIUM_MODEL, DEEPSEEK_BEST_MODEL
+from backend.ai_models import OPENAI_FAST_MODEL, OPENAI_MEDIUM_AGENT,ANTHROPIC_BEST_MODEL,OPENAI_BEST_MODEL
 from backend.openrouter_utils import get_openrouter_api_key
 from backend.anthropic_utils import stream_critique_from_anthropic
 from backend.openai_utils import stream_critique_from_openai
-from backend.deepseek_utils import stream_critique_from_deepseek
 from backend.classroom_prompts import EXERCISE_GENERATION_PROMPT, LESSON_PROMPT, AUTHOR_JUDGMENT_PROMPT, STUDENTS_PANEL_PROMPT, TEACHER_CRITIQUE_PROMPT, TEACHER_MODE_FINAL, TEACHER_MODE_ON_DEMAND, TEACHER_REVISION_NOTE, SYNTHESIS_PROMPT
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -147,7 +146,7 @@ async def review_text(request: ReviewRequest):
         )
     
     if request.previous_critiques:
-        # Summarize past critiques via mistral-small-latest to save context
+        # Summarize past critiques with the fast model to save context.
         try:
             summary = await summarize_critiques(request.previous_critiques)
         except Exception:
@@ -168,7 +167,7 @@ async def review_text(request: ReviewRequest):
     full_prompt = "".join(parts)
     
     return StreamingResponse(
-        stream_critique_from_mistral(request.text, full_prompt),
+        stream_writing_critique(request.text, full_prompt),
         media_type="text/plain"
     )
 
@@ -232,7 +231,7 @@ async def review_dialogue(request: DialogueRequest):
     
     async def stream_with_header():
         yield f"*{', '.join(chosen_names)} s'installent autour de votre texte…*\n\n---\n\n"
-        async for chunk in stream_critique_from_mistral(request.text, full_prompt):
+        async for chunk in stream_writing_critique(request.text, full_prompt):
             yield chunk
     
     return StreamingResponse(
@@ -259,7 +258,7 @@ async def review_readers(request: ReadersReviewRequest):
     full_prompt = "".join(parts)
     
     return StreamingResponse(
-        stream_critique_from_mistral(request.text, full_prompt),
+        stream_writing_critique(request.text, full_prompt),
         media_type="text/plain"
     )
 
@@ -298,7 +297,7 @@ async def world_building_feedback(request: WorldBuildingFeedbackRequest):
     full_prompt = "".join(parts)
     
     return StreamingResponse(
-        stream_critique_from_mistral(request.entry_content, full_prompt),
+        stream_writing_critique(request.entry_content, full_prompt),
         media_type="text/plain"
     )
 
@@ -323,7 +322,7 @@ async def world_building_readers(request: WBReadersReviewRequest):
     full_prompt = "".join(parts)
     
     return StreamingResponse(
-        stream_critique_from_mistral(request.entry_content, full_prompt),
+        stream_writing_critique(request.entry_content, full_prompt),
         media_type="text/plain"
     )
 
@@ -367,7 +366,7 @@ async def review_custom_panel(request: PanelReviewRequest):
     
     async def stream_with_header():
         yield f"*\u2b50 Votre panel : {', '.join(chosen_names)} prennent place autour de votre texte\u2026*\n\n---\n\n"
-        async for chunk in stream_critique_from_mistral(request.text, full_prompt):
+        async for chunk in stream_writing_critique(request.text, full_prompt):
             yield chunk
     
     return StreamingResponse(
@@ -415,7 +414,7 @@ async def world_building_custom_panel(request: WBPanelReviewRequest):
     
     async def stream_with_header():
         yield f"*\u2b50 Votre panel : {', '.join(chosen_names)} examinent votre univers\u2026*\n\n---\n\n"
-        async for chunk in stream_critique_from_mistral(request.entry_content, full_prompt):
+        async for chunk in stream_writing_critique(request.entry_content, full_prompt):
             yield chunk
     
     return StreamingResponse(
@@ -464,7 +463,7 @@ async def review_panel_analyze(request: PanelAnalyzeRequest):
 
     async def stream_with_header():
         yield f"*🔍 Votre panel : {', '.join(chosen_names)} analysent les retours des lecteurs…*\n\n---\n\n"
-        async for chunk in stream_critique_from_mistral(request.text, full_prompt):
+        async for chunk in stream_writing_critique(request.text, full_prompt):
             yield chunk
 
     return StreamingResponse(
@@ -513,7 +512,7 @@ async def wb_panel_analyze(request: WBPanelAnalyzeRequest):
 
     async def stream_with_header():
         yield f"*🔍 Votre panel : {', '.join(chosen_names)} analysent les retours sur « {request.entry_title} »…*\n\n---\n\n"
-        async for chunk in stream_critique_from_mistral(request.entry_content, full_prompt):
+        async for chunk in stream_writing_critique(request.entry_content, full_prompt):
             yield chunk
 
     return StreamingResponse(
@@ -557,7 +556,7 @@ async def world_building_autofill(request: WorldBuildingAutoFillRequest):
     user_content = "".join(user_parts)
     
     return StreamingResponse(
-        stream_from_mistral_small(prompt, user_content),
+        stream_writing_text(prompt, user_content),
         media_type="text/plain"
     )
 
@@ -664,7 +663,7 @@ async def chat_with_reviewer(request: ChatRequest):
         messages.append({"role": msg.role, "content": msg.content})
     
     return StreamingResponse(
-        stream_chat_from_mistral(messages),
+        stream_writing_chat(messages),
         media_type="text/plain"
     )
 
@@ -729,7 +728,7 @@ async def rewrite_text(request: RewriteRequest):
     ]
 
     return StreamingResponse(
-        stream_chat_from_mistral(messages),
+        stream_writing_chat(messages),
         media_type="text/plain"
     )
 
@@ -749,24 +748,24 @@ async def selection_assist(request: SelectionAssistRequest):
         f"{action_instructions}{context}{level}"
     )
     try:
-        raw = await generate_text_from_mistral(
+        raw = await generate_writing_text(
             prompt,
             f"Texte sélectionné :\n{request.text}",
-            model=MISTRAL_FAST_MODEL,
+            model=OPENAI_FAST_MODEL,
         )
         import json
-        suggestions = json.loads(raw.strip().removeprefix("```").removesuffix("```").strip())
+        suggestions = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.IGNORECASE))
         if not isinstance(suggestions, list):
             suggestions = [str(suggestions)]
     except Exception as error:
-        logger.exception("[AI] route_failed route=selection_assist model=%s", MISTRAL_FAST_MODEL)
+        logger.exception("[AI] route_failed route=selection_assist model=%s", OPENAI_FAST_MODEL)
         return {"error": str(error), "suggestions": []}
     return {"suggestions": [str(item) for item in suggestions[:5]]}
 
 
 @app.post("/chat/summarize", dependencies=[Depends(_require_openrouter)])
 async def summarize_chat(request: ChatSummarizeRequest):
-    """Résume un batch de messages de chat via mistral-small."""
+    """Résume un batch de messages de chat avec le modèle rapide."""
     msgs = [{"role": m.role, "content": m.content} for m in request.messages]
     summary = await summarize_chat_messages(msgs)
     return {"summary": summary}
@@ -1054,7 +1053,7 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
     """Le professeur propose 3 exercices d'écriture différents, parmi lesquels l'élève choisit."""
     logger.info(
         "[AI] route_started route=classroom_exercise model=%s previous_titles=%d",
-        MISTRAL_BEST_MODEL,
+        OPENAI_MEDIUM_AGENT,
         len(request.previous_exercise_titles),
     )
     avoid_repeats = ""
@@ -1074,9 +1073,9 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
         student_record=student_record,
     )
     try:
-        raw = await generate_text_from_mistral(system_prompt, "Propose-moi 3 exercices au choix pour la classe.")
+        raw = await generate_writing_text(system_prompt, "Propose-moi 3 exercices au choix pour la classe.")
     except Exception as e:
-        logger.exception("[AI] route_failed route=classroom_exercise model=%s", MISTRAL_BEST_MODEL)
+        logger.exception("[AI] route_failed route=classroom_exercise model=%s", OPENAI_MEDIUM_AGENT)
         return {"error": str(e)}
     parts = re.split(r"=+\s*EXERCICE_SUIVANT\s*=+", raw)
     exercises = [p.strip() for p in parts if p.strip()]
@@ -1089,7 +1088,7 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
         authors.append({"id": author_id, "name": AUTHORS[author_id]["name"]})
     logger.info(
         "[AI] route_completed route=classroom_exercise model=%s exercises=%d response_chars=%d",
-        MISTRAL_BEST_MODEL,
+        OPENAI_MEDIUM_AGENT,
         len(exercises),
         len(raw),
     )
@@ -1105,8 +1104,20 @@ async def classroom_lesson(request: ClassroomLessonRequest):
         experience_context=_build_experience_context(request.experience_level),
         exercise_prompt=request.exercise_prompt,
     )
+    async def lesson_stream():
+        try:
+            async for chunk in stream_writing_text(
+                system_prompt,
+                "Donne-moi le cours pour me préparer à cet exercice.",
+                model=OPENAI_MEDIUM_AGENT,
+            ):
+                yield chunk
+        except Exception:
+            logger.exception("[AI] route_failed route=classroom_lesson model=%s", OPENAI_FAST_MODEL)
+            yield "[[WRITER_LESSON_ERROR]]"
+
     return StreamingResponse(
-        stream_from_mistral_small(system_prompt, "Donne-moi le cours pour me préparer à cet exercice."),
+        lesson_stream(),
         media_type="text/plain"
     )
 
@@ -1135,15 +1146,10 @@ async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
         author_personality=author["personality"],
         peer_context=peer_context,
     )
-    # L'auteur est le rôle le plus exigeant en fidélité stylistique : on choisit au hasard entre les meilleurs modèles disponibles.
-    stream_fn, model, provider = _pick_random_provider([
-        ("anthropic", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
-        ("deepseek", stream_critique_from_deepseek, DEEPSEEK_BEST_MODEL),
-        ("mistral", stream_critique_from_mistral, MISTRAL_BEST_MODEL),
-        ("openai", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
-    ])
+    # Le jugement d'auteur exige une grande fidélité stylistique.
+    model = ANTHROPIC_BEST_MODEL
     return StreamingResponse(
-        _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
+        _trace_ai_response(stream_critique_from_anthropic(request.text, system_prompt, model=model), "anthropic", model),
         media_type="text/plain"
     )
 
@@ -1182,9 +1188,9 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
     async def stream_with_header():
         yield f"*🧑‍🎓 {', '.join(chosen_names)} lisent votre texte…*\n\n---\n\n"
         async for chunk in _trace_ai_response(
-            stream_critique_from_mistral(request.text, panel_system, model=MISTRAL_BEST_MODEL),
-            "mistral",
-            MISTRAL_BEST_MODEL,
+            stream_critique_from_openai(request.text, panel_system, model=OPENAI_FAST_MODEL),
+            "openai",
+            OPENAI_MEDIUM_AGENT,
         ):
             yield chunk
 
@@ -1221,13 +1227,9 @@ async def classroom_teacher_critique(request: ClassroomTeacherRequest):
         student_record=student_record,
     )
 
-    stream_fn, model, provider = _pick_provider([
-        ("anthropic", stream_critique_from_anthropic, ANTHROPIC_MEDIUM_MODEL),
-        ("openai", stream_critique_from_openai, OPENAI_MEDIUM_MODEL),
-        ("mistral", stream_critique_from_mistral, MISTRAL_MEDIUM_MODEL),
-    ])
+    model = ANTHROPIC_BEST_MODEL
     return StreamingResponse(
-        _trace_ai_response(stream_fn(request.text, system_prompt, model=model), provider, model),
+        _trace_ai_response(stream_critique_from_anthropic(request.text, system_prompt, model=model), "anthropic", model),
         media_type="text/plain"
     )
 
@@ -1243,7 +1245,7 @@ async def classroom_synthesize(request: ClassroomSynthesisRequest):
         critique=request.critique,
     )
     try:
-        synthesis = await generate_text_from_mistral(system_prompt, "Rédige la synthèse pour le carnet de suivi.")
+        synthesis = await generate_writing_text(system_prompt, "Rédige la synthèse pour le carnet de suivi.")
     except Exception as e:
         return {"error": str(e)}
     return {"synthesis": synthesis}

@@ -11,7 +11,7 @@ def _provider_model(provider: str, model: str) -> str:
     return f"{provider}:{model}"
 
 
-# Mistral
+# Mistral identifiers retained for explicit legacy callers; active text routes use OpenAI and Anthropic.
 MISTRAL_BEST_MODEL = "mistral-large-4"  # Public preview.
 MISTRAL_MEDIUM_MODEL = "mistral-medium-latest"
 MISTRAL_FAST_MODEL = "mistral-small-latest"
@@ -68,13 +68,10 @@ DEEPSEEK_FAST_AGENT = _provider_model("deepseek", DEEPSEEK_FAST_MODEL)
 DEEPSEEK_REASONING_AGENT = _provider_model("deepseek", DEEPSEEK_REASONING_MODEL)
 DEEPSEEK_CHAT_AGENT = _provider_model("deepseek", DEEPSEEK_CHAT_MODEL)
 
-# Google
-GOOGLE_FAST_MODEL = "gemini-2-flash-lite"
+# Google image models
 GOOGLE_IMAGE_MODEL = "gemini-2.5-flash-image"
 GOOGLE_BEST_IMAGE_MODEL = "gemini-3-pro-image-preview"
 GOOGLE_IMAGE_GENERATION_MODEL = "imagen-4.0-generate-001"
-
-GOOGLE_FAST_AGENT = _provider_model("google", GOOGLE_FAST_MODEL)
 
 ALL_MODEL_IDS = frozenset(
     value

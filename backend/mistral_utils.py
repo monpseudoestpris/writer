@@ -1,9 +1,10 @@
+"""Writer text helpers via OpenRouter (module path kept for compatibility)."""
 import logging
 from typing import AsyncGenerator
 
 from backend.openrouter_utils import complete_text, stream_text, generation_kwargs
 
-from backend.ai_models import MISTRAL_BEST_MODEL
+from backend.ai_models import MISTRAL_BEST_MODEL, OPENAI_FAST_MODEL, ANTHROPIC_MEDIUM_MODEL
 from backend.prompts import with_human_style
 
 logger = logging.getLogger(__name__)
@@ -13,13 +14,13 @@ def get_mistral_generation_kwargs() -> dict:
     return generation_kwargs(MISTRAL_BEST_MODEL)
 
 
-def _log_mistral_response(model: str, response: str) -> None:
+def _log_ai_response(model: str, response: str) -> None:
     logger.info("[AI] response_received provider=openrouter model=%s chars=%d preview=%r", model, len(response), response[:500])
 
 
 async def summarize_single_critique(critique: str) -> str:
-    """Generate a short summary of a single critique with Mistral's best model."""
-    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_single_critique", MISTRAL_BEST_MODEL)
+    """Generate a short summary of a single critique with the fast model."""
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_single_critique", OPENAI_FAST_MODEL)
     
     messages = [
         {
@@ -34,17 +35,17 @@ async def summarize_single_critique(critique: str) -> str:
     ]
     
     result = await complete_text(
-        model=MISTRAL_BEST_MODEL,
+        model=OPENAI_FAST_MODEL,
         messages=messages,
     )
     
-    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    _log_ai_response(OPENAI_FAST_MODEL, result)
     return result
 
 
 async def summarize_text(text: str) -> str:
-    """Generate a factual 5-10 line summary with Mistral's best model."""
-    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_text", MISTRAL_BEST_MODEL)
+    """Generate a factual 5-10 line summary with the fast model."""
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_text", OPENAI_FAST_MODEL)
     
     messages = [
         {
@@ -61,17 +62,17 @@ async def summarize_text(text: str) -> str:
     ]
     
     result = await complete_text(
-        model=MISTRAL_BEST_MODEL,
+        model=OPENAI_FAST_MODEL,
         messages=messages,
     )
     
-    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    _log_ai_response(OPENAI_FAST_MODEL, result)
     return result
 
 
 async def summarize_critiques(critiques: list[dict]) -> str:
-    """Summarize previous critiques into a concise digest with Mistral's best model."""
-    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_critiques", MISTRAL_BEST_MODEL)
+    """Summarize previous critiques into a concise digest with the fast model."""
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_critiques", OPENAI_FAST_MODEL)
     
     critiques_text = "\n\n".join(
         f"Critique de {c.get('reviewer', 'inconnu')} :\n{c.get('critique', '')}"
@@ -92,15 +93,15 @@ async def summarize_critiques(critiques: list[dict]) -> str:
     ]
     
     result = await complete_text(
-        model=MISTRAL_BEST_MODEL,
+        model=OPENAI_FAST_MODEL,
         messages=messages,
     )
     
-    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    _log_ai_response(OPENAI_FAST_MODEL, result)
     return result
 
 
-async def stream_critique_from_mistral(text: str, prompt: str, model: str = MISTRAL_BEST_MODEL) -> AsyncGenerator[str, None]:
+async def stream_writing_critique(text: str, prompt: str, model: str = OPENAI_FAST_MODEL) -> AsyncGenerator[str, None]:
     logger.info("[AI] request_started provider=openrouter model=%s", model)
     response_parts: list[str] = []
     user_content = (
@@ -124,9 +125,13 @@ async def stream_critique_from_mistral(text: str, prompt: str, model: str = MIST
     logger.info("[AI] response_received provider=openrouter model=%s chars=%d preview=%r", model, len(''.join(response_parts)), ''.join(response_parts)[:500])
 
 
-async def stream_from_mistral_small(system_prompt: str, user_content: str) -> AsyncGenerator[str, None]:
-    """Stream an auto-fill response with Mistral's best model."""
-    logger.info("[AI] request_started provider=openrouter model=%s", MISTRAL_BEST_MODEL)
+async def stream_writing_text(
+    system_prompt: str,
+    user_content: str,
+    model: str = OPENAI_FAST_MODEL,
+) -> AsyncGenerator[str, None]:
+    """Stream an auto-fill response through OpenRouter."""
+    logger.info("[AI] request_started provider=openrouter model=%s", model)
     response_parts: list[str] = []
     messages = [
         {"role": "system", "content": with_human_style(system_prompt)},
@@ -134,17 +139,17 @@ async def stream_from_mistral_small(system_prompt: str, user_content: str) -> As
     ]
     
     async for delta in stream_text(
-        model=MISTRAL_BEST_MODEL,
+        model=model,
         messages=messages,
     ):
         response_parts.append(delta)
         yield delta
-    _log_mistral_response(MISTRAL_BEST_MODEL, ''.join(response_parts))
+    _log_ai_response(model, ''.join(response_parts))
 
 
 async def summarize_chat_messages(messages: list[dict]) -> str:
-    """Summarize a batch of chat messages with Mistral's best model."""
-    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_chat_messages", MISTRAL_BEST_MODEL)
+    """Summarize a batch of chat messages with the fast model."""
+    logger.info("[AI] request_started provider=openrouter model=%s operation=summarize_chat_messages", OPENAI_FAST_MODEL)
     formatted = "\n".join(
         f"{'Auteur' if m['role']=='user' else 'Critique'}: {m['content']}"
         for m in messages
@@ -159,37 +164,37 @@ async def summarize_chat_messages(messages: list[dict]) -> str:
         "Sois concis mais exhaustif. Réponds en français, 150-250 mots maximum."
     )
     result = await complete_text(
-        model=MISTRAL_BEST_MODEL,
+        model=OPENAI_FAST_MODEL,
         messages=[
             {"role": "system", "content": with_human_style(prompt)},
             {"role": "user", "content": formatted}
         ],
     )
-    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    _log_ai_response(OPENAI_FAST_MODEL, result)
     return result
 
 
-async def stream_chat_from_mistral(messages: list[dict]) -> AsyncGenerator[str, None]:
-    """Stream a multi-turn chat response with Mistral's best model.
+async def stream_writing_chat(messages: list[dict]) -> AsyncGenerator[str, None]:
+    """Stream a multi-turn chat response with the fast writing model.
     
     Messages should include system prompt and full conversation history.
     Requests are sent through OpenRouter with the full conversation history.
     """
-    logger.info("[AI] request_started provider=openrouter model=%s", MISTRAL_BEST_MODEL)
+    logger.info("[AI] request_started provider=openrouter model=%s", OPENAI_FAST_MODEL)
     response_parts: list[str] = []
     
     async for delta in stream_text(
-        model=MISTRAL_BEST_MODEL,
+        model=OPENAI_FAST_MODEL,
         messages=messages,
     ):
         response_parts.append(delta)
         yield delta
-    _log_mistral_response(MISTRAL_BEST_MODEL, ''.join(response_parts))
+    _log_ai_response(OPENAI_FAST_MODEL, ''.join(response_parts))
 
 
 async def get_structured_comments(text: str, system_prompt: str) -> str:
-    """Appel au meilleur modèle Mistral pour obtenir des commentaires JSON structurés."""
-    logger.info("[AI] request_started provider=openrouter model=%s operation=get_structured_comments", MISTRAL_BEST_MODEL)
+    """Produit des commentaires JSON structurés avec le modèle premium."""
+    logger.info("[AI] request_started provider=openrouter model=%s operation=get_structured_comments", ANTHROPIC_MEDIUM_MODEL)
     user_content = (
         "[DÉBUT DU DOCUMENT]\n"
         f"{text}\n"
@@ -201,15 +206,15 @@ async def get_structured_comments(text: str, system_prompt: str) -> str:
         {"role": "user", "content": user_content}
     ]
     result = await complete_text(
-        model=MISTRAL_BEST_MODEL,
+        model=ANTHROPIC_MEDIUM_MODEL,
         messages=messages,
     )
-    _log_mistral_response(MISTRAL_BEST_MODEL, result)
+    _log_ai_response(ANTHROPIC_MEDIUM_MODEL, result)
     return result
 
 
-async def generate_text_from_mistral(system_prompt: str, user_content: str, model: str = MISTRAL_BEST_MODEL) -> str:
-    """Appel non-streaming au meilleur modèle Mistral, pour générer un contenu texte libre."""
+async def generate_writing_text(system_prompt: str, user_content: str, model: str = OPENAI_FAST_MODEL) -> str:
+    """Génère un texte avec le modèle demandé via OpenRouter."""
     logger.info("[AI] request_started provider=openrouter model=%s operation=generate_text", model)
     messages = [
         {"role": "system", "content": with_human_style(system_prompt)},
@@ -219,5 +224,12 @@ async def generate_text_from_mistral(system_prompt: str, user_content: str, mode
         model=model,
         messages=messages,
     )
-    _log_mistral_response(model, result)
+    _log_ai_response(model, result)
     return result
+
+
+# Compatibility imports for older callers; active routes use the neutral names.
+stream_critique_from_mistral = stream_writing_critique
+stream_from_mistral_small = stream_writing_text
+stream_chat_from_mistral = stream_writing_chat
+generate_text_from_mistral = generate_writing_text
