@@ -234,10 +234,7 @@ REVIEWER_PROMPTS = {
         "automatiques ; protège la voix de l'élève."
     ),
 }
-REVIEWER_PROMPTS = {
-    reviewer_id: REVIEWER_SIMULATION_RULES + prompt
-    for reviewer_id, prompt in REVIEWER_PROMPTS.items()
-}
+GENERAL_PROMPT = REVIEWER_SIMULATION_RULES + GENERAL_PROMPT
 
 PANEL_DISCUSSION_RULES = (
     "RÉALISME DES ÉCHANGES :\n"
@@ -314,7 +311,8 @@ REVIEWER_NAMES = {
 # ==========================================
 
 DIALOGUE_PROMPT = (
-    PANEL_DISCUSSION_RULES
+    REVIEWER_SIMULATION_RULES
+    + PANEL_DISCUSSION_RULES
     + "Tu animes une simulation d'atelier littéraire. Tu vas faire discuter {nb_authors} auteurs célèbres "
     "autour d'un texte soumis par son auteur.\n\n"
     "Les auteurs présents sont :\n{authors_list}\n\n"
@@ -348,7 +346,8 @@ DIALOGUE_PROMPT = (
 # ==========================================
 
 CHAT_SINGLE_REVIEWER_PROMPT = (
-    "Tu reprends le rôle fictif de {reviewer_name}. Une critique littéraire a été donnée à l'auteur "
+    REVIEWER_SIMULATION_RULES
+    + "Tu reprends le rôle fictif de {reviewer_name}. Une critique littéraire a été donnée à l'auteur "
     "et il souhaite maintenant discuter avec toi.\n\n"
     "Ta personnalité :\n{reviewer_personality}\n\n"
     "RÈGLES DU CHAT :\n"
@@ -365,7 +364,8 @@ CHAT_SINGLE_REVIEWER_PROMPT = (
 )
 
 CHAT_PANEL_PROMPT = (
-    PANEL_DISCUSSION_RULES
+    REVIEWER_SIMULATION_RULES
+    + PANEL_DISCUSSION_RULES
     + "Tu simules une discussion de groupe entre {nb_authors} auteurs célèbres. "
     "Ils reprennent la critique collective disponible dans l'historique et répondent à la nouvelle demande de l'auteur.\n\n"
     "Les membres sont :\n{authors_list}\n\n"
@@ -400,7 +400,8 @@ CHAT_CONTEXT_WB = (
 # ==========================================
 
 REWRITE_SINGLE_PROMPT = (
-    "Dans le rôle fictif de {reviewer_name}, tu aides l'auteur à RÉÉCRIRE son texte.\n\n"
+    REVIEWER_SIMULATION_RULES
+    + "Dans le rôle fictif de {reviewer_name}, tu aides l'auteur à RÉÉCRIRE son texte.\n\n"
     "Ta personnalité :\n{reviewer_personality}\n\n"
     "RÈGLES DE RÉÉCRITURE :\n"
     "- Tu produis une NOUVELLE VERSION COMPLÈTE du texte, pas un commentaire.\n"
@@ -414,7 +415,8 @@ REWRITE_SINGLE_PROMPT = (
 )
 
 REWRITE_PANEL_PROMPT = (
-    "Tu es un collectif de {nb_authors} auteurs célèbres qui réécrivent ensemble un texte.\n"
+    REVIEWER_SIMULATION_RULES
+    + "Tu es un collectif de {nb_authors} auteurs célèbres qui réécrivent ensemble un texte.\n"
     "Les membres sont :\n{authors_list}\n\n"
     "Voici leurs personnalités :\n{authors_personalities}\n\n"
     "RÈGLES DE RÉÉCRITURE :\n"
@@ -482,7 +484,8 @@ REVIEW_DOCUMENT_PROMPT = (
 )
 
 REVIEW_DOCUMENT_JSON_PROMPT = (
-    "Tu es un relecteur professionnel. On te soumet un document COMPLET. "
+    REVIEWER_SIMULATION_RULES
+    + "Tu es un relecteur professionnel. On te soumet un document COMPLET. "
     "Tu dois d'abord LIRE ET COMPRENDRE L'ENSEMBLE du document pour en saisir le sens global, "
     "la logique d'ensemble, les arguments, la structure et le fil conducteur. "
     "Ensuite seulement, tu produis des COMMENTAIRES PRÉCIS sur des passages spécifiques.\n\n"
@@ -591,7 +594,8 @@ REVIEW_DOCUMENT_JSON_PROMPT = (
 # ==========================================
 
 CUSTOM_PANEL_PROMPT = (
-    PANEL_DISCUSSION_RULES
+    REVIEWER_SIMULATION_RULES
+    + PANEL_DISCUSSION_RULES
     + "Tu animes un atelier fictif avec les profils littéraires choisis par l'auteur. "
     "Tu vas faire discuter ces {nb_authors} auteurs célèbres autour du texte soumis.\n\n"
     "Les membres du panel sont :\n{authors_list}\n\n"
@@ -621,7 +625,8 @@ CUSTOM_PANEL_PROMPT = (
 )
 
 WB_CUSTOM_PANEL_PROMPT = (
-    PANEL_DISCUSSION_RULES
+    REVIEWER_SIMULATION_RULES
+    + PANEL_DISCUSSION_RULES
     + "Tu animes un atelier fictif consacré au world building. "
     "L'auteur a choisi son panel d'experts favoris pour évaluer un élément de son univers fictif.\n\n"
     "Les membres du panel sont :\n{authors_list}\n\n"
@@ -656,7 +661,8 @@ WB_CUSTOM_PANEL_PROMPT = (
 # ==========================================
 
 PANEL_ANALYZE_READERS_PROMPT = (
-    PANEL_DISCUSSION_RULES
+    REVIEWER_SIMULATION_RULES
+    + PANEL_DISCUSSION_RULES
     + "Tu animes un atelier fictif. L'auteur fournit des retours de lecteurs sur son texte. "
     "Son panel d'experts favoris va maintenant analyser ces retours et proposer un plan d'action.\n\n"
     "Les membres du panel sont :\n{authors_list}\n\n"
@@ -692,7 +698,8 @@ PANEL_ANALYZE_READERS_PROMPT = (
 )
 
 WB_PANEL_ANALYZE_READERS_PROMPT = (
-    PANEL_DISCUSSION_RULES
+    REVIEWER_SIMULATION_RULES
+    + PANEL_DISCUSSION_RULES
     + "Tu animes un atelier fictif consacré au world building. "
     "L'auteur a obtenu des retours de lecteurs sur un élément de son univers fictif. "
     "Son panel d'experts favoris va maintenant analyser ces retours et proposer un plan d'action.\n\n"
@@ -855,7 +862,8 @@ REVIEWER_FIRST_NAMES = {
 # ==========================================
 
 WORLD_BUILDING_FEEDBACK_PROMPT = (
-    "Tu es un consultant expert en world building pour la fiction (fantasy, SF, thriller, historique, etc.). "
+    REVIEWER_SIMULATION_RULES
+    + "Tu es un consultant expert en world building pour la fiction (fantasy, SF, thriller, historique, etc.). "
     "Tu es à la fois bienveillant et exigeant. Ton rôle est d'aider l'auteur à renforcer la cohérence, "
     "la profondeur et l'originalité de son univers fictif.\n\n"
     "CONTEXTE ESSENTIEL :\n"

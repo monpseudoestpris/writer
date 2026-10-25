@@ -75,6 +75,14 @@ def get_openrouter_client() -> AsyncOpenAI:
 def resolve_model(model: str) -> str:
     if model in OPENROUTER_MODEL_IDS:
         return OPENROUTER_MODEL_IDS[model]
+    # UI/agent identifiers use "provider:native-id"; OpenRouter expects "provider/model-id".
+    if ":" in model:
+        provider, native_model = model.split(":", 1)
+        slug = OPENROUTER_MODEL_IDS.get(native_model)
+        openrouter_provider = "mistralai" if provider == "mistral" else provider
+        if slug and slug.split("/", 1)[0] == openrouter_provider:
+            return slug
+        raise ValueError(f"Modèle sans identifiant OpenRouter configuré : {model}")
     if "/" in model:
         return model
     raise ValueError(f"Modèle sans identifiant OpenRouter configuré : {model}")

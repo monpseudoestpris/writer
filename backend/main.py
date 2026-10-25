@@ -13,7 +13,7 @@ from backend.mistral_utils import stream_writing_critique, summarize_critiques, 
 from backend.prompts import REVIEWER_PROMPTS, REVIEWER_NAMES, GENERAL_PROMPT, DIALOGUE_PROMPT, REVIEWER_FIRST_NAMES, READERS_PANEL_PROMPT, WB_READERS_PANEL_PROMPT, WORLD_BUILDING_FEEDBACK_PROMPT, WB_AUTOFILL_PROMPTS, CUSTOM_PANEL_PROMPT, WB_CUSTOM_PANEL_PROMPT, PANEL_ANALYZE_READERS_PROMPT, WB_PANEL_ANALYZE_READERS_PROMPT, CHAT_SINGLE_REVIEWER_PROMPT, CHAT_PANEL_PROMPT, CHAT_CONTEXT_CHAPTER, CHAT_CONTEXT_WB, REWRITE_SINGLE_PROMPT, REWRITE_PANEL_PROMPT, REWRITE_GENERIC_PROMPT, REWRITE_CONTEXT_CHAPTER, REWRITE_CONTEXT_WB, REVIEW_DOCUMENT_PROMPT, REVIEW_DOCUMENT_JSON_PROMPT
 from backend.students import STUDENTS, STUDENT_IDS, TEACHER_NAME, TEACHER_PROMPT, get_students_list
 from backend.auteurs import AUTHORS, get_author_for_genre
-from backend.ai_models import OPENAI_FAST_MODEL, OPENAI_MEDIUM_AGENT,ANTHROPIC_BEST_MODEL,OPENAI_BEST_MODEL
+from backend.ai_models import OPENAI_FAST_MODEL, OPENAI_MEDIUM_AGENT, ANTHROPIC_BEST_MODEL, OPENAI_BEST_MODEL
 from backend.openrouter_utils import get_openrouter_api_key
 from backend.anthropic_utils import stream_critique_from_anthropic
 from backend.openai_utils import stream_critique_from_openai
@@ -1073,7 +1073,9 @@ async def classroom_exercise(request: ClassroomExerciseRequest):
         student_record=student_record,
     )
     try:
-        raw = await generate_writing_text(system_prompt, "Propose-moi 3 exercices au choix pour la classe.")
+        raw = await generate_writing_text(
+            system_prompt, "Propose-moi 3 exercices au choix pour la classe.", model=OPENAI_MEDIUM_AGENT,
+        )
     except Exception as e:
         logger.exception("[AI] route_failed route=classroom_exercise model=%s", OPENAI_MEDIUM_AGENT)
         return {"error": str(e)}
@@ -1113,7 +1115,7 @@ async def classroom_lesson(request: ClassroomLessonRequest):
             ):
                 yield chunk
         except Exception:
-            logger.exception("[AI] route_failed route=classroom_lesson model=%s", OPENAI_FAST_MODEL)
+            logger.exception("[AI] route_failed route=classroom_lesson model=%s", OPENAI_MEDIUM_AGENT)
             yield "[[WRITER_LESSON_ERROR]]"
 
     return StreamingResponse(
@@ -1190,7 +1192,7 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
         async for chunk in _trace_ai_response(
             stream_critique_from_openai(request.text, panel_system, model=OPENAI_FAST_MODEL),
             "openai",
-            OPENAI_MEDIUM_AGENT,
+            OPENAI_FAST_MODEL,
         ):
             yield chunk
 

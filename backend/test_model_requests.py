@@ -103,6 +103,16 @@ def test_unknown_native_model_fails_explicitly():
     assert router.resolve_model(models.OPENAI_FAST_MODEL) == "openai/gpt-6-luna"
 
 
+def test_provider_prefixed_agent_models_resolve_through_openrouter():
+    assert router.resolve_model(models.OPENAI_MEDIUM_AGENT) == "openai/gpt-6.1-sol"
+    assert router.generation_kwargs(models.OPENAI_MEDIUM_AGENT) == {}
+    assert router.resolve_model(models.MISTRAL_BEST_AGENT) == models.OPENROUTER_MODEL_IDS[models.MISTRAL_BEST_MODEL]
+    with pytest.raises(ValueError, match="OpenRouter"):
+        router.resolve_model("openai:unknown-model")
+    with pytest.raises(ValueError, match="OpenRouter"):
+        router.resolve_model("anthropic:gpt-6.1-sol")
+
+
 @pytest.mark.parametrize("status,payload,expected", [
     (401, {"error": {"message": "Invalid key"}}, AuthenticationError),
     (200, {"error": {"message": "Provider failed"}, "choices": []}, RuntimeError),
