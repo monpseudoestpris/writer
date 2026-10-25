@@ -21,6 +21,57 @@ import { getLessonJobs, getServerLessonJobs, startLessonJob, subscribeLessonJobs
 
 const API_URL = 'http://localhost:8000';
 
+function ExerciseGradeBadge({ exercise }: { exercise: ClassroomExercise }) {
+  if (exercise.status !== 'completed') return null;
+  // Prefer the latest graded teacher review; later help requests have no grade.
+  const reviews = [...exercise.commentHistory].reverse()
+    .filter(comment => comment.source === 'teacher')
+    .map(comment => comment.content);
+  reviews.push(exercise.teacherCritique);
+  let grade: number | undefined;
+  for (const review of reviews) {
+    const match = review.match(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?Note(?:\s+finale)?\s*:\s*(?:\*\*)?\s*(\d{1,2}(?:[.,]\d+)?)\s*\/\s*20\b/i);
+    if (!match) continue;
+    const value = Number(match[1].replace(',', '.'));
+    if (value >= 0 && value <= 20) { grade = value; break; }
+  }
+  if (grade === undefined) return null;
+  const label = `${grade.toLocaleString('fr-FR')}/20`;
+  const color = grade >= 14
+    ? 'border-emerald-400/35 bg-emerald-400/15 text-emerald-300'
+    : grade >= 10
+      ? 'border-amber-400/35 bg-amber-400/15 text-amber-300'
+      : 'border-red-400/35 bg-red-400/15 text-red-300';
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-bold tabular-nums ${color}`}
+      title={`Note finale du professeur : ${label}`}
+      aria-label={`Note finale du professeur : ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function getRevisionContext(exercise: ClassroomExercise, source: 'author' | 'peers' | 'teacher') {
+  const history = [...exercise.commentHistory].reverse();
+  const previous = history.find(entry => entry.source === source && entry.textSnapshot !== undefined)
+    ?? history.find(entry => entry.textSnapshot !== undefined);
+  if (previous) return {
+    previous_text: previous.textSnapshot,
+    previous_feedback: previous.content,
+    previous_feedback_source: previous.source,
+  };
+  // Older peer reviews already stored their submitted text outside the history.
+  if (exercise.peerReviewTextSnapshot) return {
+    previous_text: exercise.peerReviewTextSnapshot,
+    previous_feedback: exercise.peerComments,
+    previous_feedback_source: 'peers',
+  };
+  return {};
+}
+
+
 const handleSelectionAssist = async (
   text: string,
   action: 'synonyms' | 'rephrase' | 'improve'
@@ -188,6 +239,22 @@ export default function ApprendsPage() {
   const [exerciseAuthors, setExerciseAuthors] = useState<{ id: string; name: string }[]>([]);
   const [isLoadingAuthorJudgment, setIsLoadingAuthorJudgment] = useState(false);
   const [feedbackTab, setFeedbackTab] = useState<'latest' | 'history'>('latest');
+  const [focusedFeedbackSource, setFocusedFeedbackSource] = useState<'author' | 'teacher' | 'peers' | null>(null);
+  const latestFeedback = selected ? (['author', 'teacher', 'peers'] as const).map(source => {
+    const history = [...selected.commentHistory].reverse().find(comment => comment.source === source);
+    const current = source === 'author' ? selected.authorJudgment
+      : source === 'teacher' ? selected.teacherCritique : selected.peerComments;
+    const loading = source === 'author' ? isLoadingAuthorJudgment
+      : source === 'teacher' ? isLoadingTeacher : isLoadingPeers;
+    return {
+      source,
+      content: loading ? current || history?.content : history?.content || current,
+      createdAt: history ? new Date(history.createdAt).getTime() : 0,
+    };
+  }).filter(feedback => feedback.content).sort((a, b) =>
+    Number(b.source === focusedFeedbackSource) - Number(a.source === focusedFeedbackSource)
+      || b.createdAt - a.createdAt
+  ) : [];
   const [expandedCommentVersions, setExpandedCommentVersions] = useState<Set<string>>(new Set());
   const [editorWidth, setEditorWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
@@ -203,6 +270,7 @@ export default function ApprendsPage() {
     setShowLesson(resumeView && sessionStorage.getItem('writer-classroom-view') === 'course');
     if (!resumeView) sessionStorage.setItem('writer-classroom-view', 'exercise');
     setFeedbackTab('latest');
+    setFocusedFeedbackSource(null);
     setExpandedCommentVersions(new Set());
     saveLastClassroomExerciseId(ex.id).catch(() => {});
   };
@@ -341,6 +409,8 @@ export default function ApprendsPage() {
   const fetchAuthorJudgment = async () => {
     if (!selected || !selected.authorId) return;
     setIsLoadingAuthorJudgment(true);
+    setFeedbackTab('latest');
+    setFocusedFeedbackSource('author');
     setError(null);
     try {
       const plainText = htmlToPlainText(content);
@@ -350,11 +420,15 @@ export default function ApprendsPage() {
           text: plainText,
           exercise_prompt: selected.promptMarkdown,
           author_id: selected.authorId,
+          ...getRevisionContext(selected, 'author'),
           peer_comments: selected.peerComments || null,
           teacher_critique: selected.teacherCritique || null,
           experience_level: experienceLevel,
         },
-        (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: text } : e))
+        (text) => {
+          setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, authorJudgment: text } : e));
+          setSelected(prev => prev?.id === selected.id ? { ...prev, authorJudgment: text } : prev);
+        }
       );
       await updateClassroomExercise(selected.id, { authorJudgment: full });
       const historyEntry = await appendClassroomComment(selected.id, { source: 'author', content: full, textSnapshot: plainText });
@@ -439,12 +513,17 @@ export default function ApprendsPage() {
     if (!plainText.trim()) return;
 
     setIsLoadingPeers(true);
+    setFeedbackTab('latest');
+    setFocusedFeedbackSource('peers');
     setError(null);
     try {
       const full = await streamInto(
         `${API_URL}/classroom/peer-review`,
-        { text: plainText, exercise_prompt: selected.promptMarkdown, num_students: 5, experience_level: experienceLevel },
-        (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: text } : e))
+        { text: plainText, exercise_prompt: selected.promptMarkdown, num_students: 5, experience_level: experienceLevel, ...getRevisionContext(selected, 'peers') },
+        (text) => {
+          setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, peerComments: text } : e));
+          setSelected(prev => prev?.id === selected.id ? { ...prev, peerComments: text } : prev);
+        }
       );
       await updateClassroomExercise(selected.id, { peerComments: full, peerReviewTextSnapshot: plainText, status: 'reviewed' });
       const historyEntry = await appendClassroomComment(selected.id, { source: 'peers', content: full, textSnapshot: plainText });
@@ -467,6 +546,8 @@ export default function ApprendsPage() {
     if (!plainText.trim()) return;
 
     setIsLoadingTeacher(true);
+    setFeedbackTab('latest');
+    setFocusedFeedbackSource('teacher');
     setError(null);
     try {
       // The peer comments may refer to an earlier draft if the student kept editing since then
@@ -478,11 +559,15 @@ export default function ApprendsPage() {
           exercise_prompt: selected.promptMarkdown,
           peer_comments: selected.peerComments || null,
           on_demand: onDemand,
+          ...getRevisionContext(selected, 'teacher'),
           past_syntheses: getPastSyntheses(selected.id),
           text_changed_since_peer_review: textChangedSincePeerReview,
           experience_level: experienceLevel,
         },
-        (text) => setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, teacherCritique: text } : e))
+        (text) => {
+          setExercises(prev => prev.map(e => e.id === selected.id ? { ...e, teacherCritique: text } : e));
+          setSelected(prev => prev?.id === selected.id ? { ...prev, teacherCritique: text } : prev);
+        }
       );
       const status = onDemand ? selected.status : 'completed';
       let synthesis = selected.synthesis;
@@ -598,8 +683,9 @@ export default function ApprendsPage() {
             >
               <div className="min-w-0">
                 <div className="text-base text-[var(--text-primary)] leading-snug break-words" title={ex.title}>{ex.title}</div>
-                <div className="text-sm text-[var(--text-muted)] mt-0.5">
-                  {ex.status === 'completed' ? '✅ Terminé' : ex.status === 'reviewed' ? '🧑‍🎓 Commenté' : '📝 Brouillon'}
+                <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-muted)] mt-1">
+                  <span>{ex.status === 'completed' ? '✅ Terminé' : ex.status === 'reviewed' ? '🧑‍🎓 Commenté' : '📝 Brouillon'}</span>
+                  <ExerciseGradeBadge exercise={ex} />
                 </div>
               </div>
               <button
@@ -991,7 +1077,7 @@ export default function ApprendsPage() {
                       )}
                     </button>
                   </div>
-                  <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+                  <div key={`${selected.id}-${feedbackTab}-${focusedFeedbackSource}`} className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
                     {feedbackTab === 'history' ? (
                       selected.commentHistory.length > 0 ? (
                         [...selected.commentHistory].reverse().map(comment => (
@@ -1043,30 +1129,14 @@ export default function ApprendsPage() {
                       )
                     ) : (
                       <>
-                    {selected.peerComments && (
-                      <div>
-                        <h2 className="text-[var(--text-muted)] text-xs font-semibold tracking-widest uppercase mb-2">
-                          Avis des camarades
+                    {latestFeedback.map(feedback => (
+                      <div key={feedback.source}>
+                        <h2 className={`text-xs font-semibold tracking-widest uppercase mb-2 ${feedback.source === 'author' ? 'text-[var(--accent-3)]' : feedback.source === 'teacher' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>
+                          {feedback.source === 'author' ? `🖋️ Jugement de ${selected.authorName}` : feedback.source === 'teacher' ? `Avis de ${teacherName}` : 'Avis des camarades'}
                         </h2>
-                        <div className="critique-content">{renderMarkdown(selected.peerComments)}</div>
+                        <div className="critique-content">{renderMarkdown(feedback.content || '')}</div>
                       </div>
-                    )}
-                    {selected.teacherCritique && (
-                      <div>
-                        <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
-                          Avis de {teacherName}
-                        </h2>
-                        <div className="critique-content">{renderMarkdown(selected.teacherCritique)}</div>
-                      </div>
-                    )}
-                    {selected.authorJudgment && (
-                      <div>
-                        <h2 className="text-[var(--accent-3)] text-xs font-semibold tracking-widest uppercase mb-2">
-                          🖋️ Jugement de {selected.authorName}
-                        </h2>
-                        <div className="critique-content">{renderMarkdown(selected.authorJudgment)}</div>
-                      </div>
-                    )}
+                    ))}
                     {selected.synthesis && (
                       <div>
                         <h2 className="text-[var(--accent)] text-xs font-semibold tracking-widest uppercase mb-2">
@@ -1077,7 +1147,7 @@ export default function ApprendsPage() {
                         </div>
                       </div>
                     )}
-                    {!selected.peerComments && !selected.teacherCritique && !selected.authorJudgment && (
+                    {latestFeedback.length === 0 && (
                       <p className="text-base text-[var(--text-muted)] text-center mt-10">
                         Écrivez votre texte puis demandez l&apos;avis de vos camarades ou du professeur.
                       </p>

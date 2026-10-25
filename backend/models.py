@@ -165,7 +165,13 @@ class ClassroomLessonRequest(BaseModel):
     experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
-class ClassroomAuthorJudgmentRequest(BaseModel):
+class ClassroomRevisionContext(BaseModel):
+    previous_text: Optional[str] = None
+    previous_feedback: Optional[str] = None
+    previous_feedback_source: Optional[str] = None
+
+
+class ClassroomAuthorJudgmentRequest(ClassroomRevisionContext):
     text: str
     exercise_prompt: str
     author_id: str  # id from backend.auteurs.AUTHORS, assigned to this exercise
@@ -174,7 +180,7 @@ class ClassroomAuthorJudgmentRequest(BaseModel):
     experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
-class ClassroomPeerReviewRequest(BaseModel):
+class ClassroomPeerReviewRequest(ClassroomRevisionContext):
     text: str
     exercise_prompt: str
     num_students: int = 5
@@ -182,7 +188,7 @@ class ClassroomPeerReviewRequest(BaseModel):
     experience_level: ClassroomExperienceLevel = "grand_debutant"
 
 
-class ClassroomTeacherRequest(BaseModel):
+class ClassroomTeacherRequest(ClassroomRevisionContext):
     text: str
     exercise_prompt: str
     peer_comments: Optional[str] = None  # provided when students already reviewed

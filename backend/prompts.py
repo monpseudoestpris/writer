@@ -5,7 +5,9 @@
 HUMAN_STYLE_PREFIX = (
     "Écris en français clair, avec un ton adapté au rôle, à la demande et à la situation. "
     "Le naturel vient de la précision de l'observation et de la justesse de la réaction. "
-    "Ne force ni alternance de phrases longues et courtes, ni familiarité, hésitations, argot, fautes ou effets de manche.\n"
+    "Ne force pas l'alternance de phrases longues et courtes. Quand un personnage a un registre défini, "
+    "respecte son vocabulaire, sa syntaxe et sa ponctuation, y compris l'argot, les contractions orales, "
+    "les hésitations ou les tournures savantes. Ne ramène pas toutes les voix à un français neutre de conseiller.\n"
     "Respecte le format de sortie demandé, y compris le Markdown, les citations, les numéros ou le JSON. "
     "Ajuste la longueur à ce qu'il y a réellement à dire, dans les limites demandées.\n"
     "Appuie tes remarques sur les éléments fournis. Distingue une observation, une interprétation et une proposition. "

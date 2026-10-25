@@ -633,20 +633,24 @@ export async function getClassroomExercises(): Promise<ClassroomExercise[]> {
   const db = await getDB();
   const all = await db.getAll('classroomExercises');
   return all
-    .map(e => ({
-      ...e,
-      synthesis: e.synthesis ?? '',
-      peerReviewTextSnapshot: e.peerReviewTextSnapshot ?? '',
-      lesson: e.lesson ?? '',
-      authorId: e.authorId ?? '',
-      authorName: e.authorName ?? '',
-      authorJudgment: e.authorJudgment ?? '',
-      commentHistory: e.commentHistory?.length ? e.commentHistory : [
+    .map(e => {
+      const commentHistory = e.commentHistory?.length ? e.commentHistory : [
         ...(e.peerComments ? [{ id: `${e.id}-peers`, source: 'peers' as const, content: e.peerComments, textSnapshot: e.peerReviewTextSnapshot || undefined, createdAt: e.updatedAt }] : []),
         ...(e.teacherCritique ? [{ id: `${e.id}-teacher`, source: 'teacher' as const, content: e.teacherCritique, createdAt: e.updatedAt }] : []),
         ...(e.authorJudgment ? [{ id: `${e.id}-author`, source: 'author' as const, content: e.authorJudgment, createdAt: e.updatedAt }] : []),
-      ],
-    }))
+      ];
+      const latestAuthorJudgment = [...commentHistory].reverse().find(comment => comment.source === 'author')?.content;
+      return {
+        ...e,
+        synthesis: e.synthesis ?? '',
+        peerReviewTextSnapshot: e.peerReviewTextSnapshot ?? '',
+        lesson: e.lesson ?? '',
+        authorId: e.authorId ?? '',
+        authorName: e.authorName ?? '',
+        authorJudgment: latestAuthorJudgment ?? e.authorJudgment ?? '',
+        commentHistory,
+      };
+    })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
@@ -660,23 +664,31 @@ export async function updateClassroomExercise(
   updates: Partial<Pick<ClassroomExercise, 'content' | 'peerComments' | 'peerReviewTextSnapshot' | 'teacherCritique' | 'lesson' | 'authorJudgment' | 'synthesis' | 'status'>>
 ): Promise<void> {
   const db = await getDB();
-  const exercise = await db.get('classroomExercises', id);
+  const tx = db.transaction('classroomExercises', 'readwrite');
+  const exercise = await tx.store.get(id);
   if (exercise) {
-    await db.put('classroomExercises', { ...exercise, ...updates, updatedAt: new Date() });
+    await tx.store.put({ ...exercise, ...updates, updatedAt: new Date() });
   }
+  await tx.done;
 }
 
 export async function appendClassroomComment(id: string, comment: Omit<ClassroomComment, 'id' | 'createdAt'>): Promise<ClassroomComment | undefined> {
   const db = await getDB();
-  const exercise = await db.get('classroomExercises', id);
-  if (!exercise) return undefined;
+  const tx = db.transaction('classroomExercises', 'readwrite');
+  const exercise = await tx.store.get(id);
+  if (!exercise) { await tx.done; return undefined; }
   const history = exercise.commentHistory ?? [];
-  const entry = { ...comment, id: crypto.randomUUID(), createdAt: new Date() };
-  await db.put('classroomExercises', {
-      ...exercise,
-      commentHistory: [...history, entry],
-      updatedAt: new Date(),
+  const entry: ClassroomComment = { ...comment, id: crypto.randomUUID(), createdAt: new Date() };
+  const latestField = comment.source === 'author' ? { authorJudgment: comment.content }
+    : comment.source === 'teacher' ? { teacherCritique: comment.content }
+    : { peerComments: comment.content };
+  await tx.store.put({
+    ...exercise,
+    ...latestField,
+    commentHistory: [...history, entry],
+    updatedAt: new Date(),
   });
+  await tx.done;
   return entry;
 }
 

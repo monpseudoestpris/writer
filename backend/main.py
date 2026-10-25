@@ -1,3 +1,4 @@
+from backend.revision_context import build_revision_context
 from fastapi import Depends, HTTPException, FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -1148,6 +1149,8 @@ async def classroom_author_judgment(request: ClassroomAuthorJudgmentRequest):
         author_personality=author["personality"],
         peer_context=peer_context,
     )
+    system_prompt += build_revision_context(request)
+
     # Le jugement d'auteur exige une grande fidélité stylistique.
     model = ANTHROPIC_BEST_MODEL
     return StreamingResponse(
@@ -1184,6 +1187,8 @@ async def classroom_peer_review(request: ClassroomPeerReviewRequest):
         students_list=students_list,
         students_personalities=students_personalities,
     )
+
+    panel_system += build_revision_context(request)
 
     chosen_names = [STUDENTS[sid]["name"] for sid in chosen]
 
@@ -1228,6 +1233,8 @@ async def classroom_teacher_critique(request: ClassroomTeacherRequest):
         mode_instructions=mode_instructions,
         student_record=student_record,
     )
+
+    system_prompt += build_revision_context(request)
 
     model = ANTHROPIC_BEST_MODEL
     return StreamingResponse(
